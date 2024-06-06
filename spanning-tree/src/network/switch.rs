@@ -25,6 +25,12 @@ pub struct BPDU{
     port: u32
 }
 
+impl ToString for BPDU{
+    fn to_string(&self) -> String{
+        format!("<{},{},{},{}>", self.root, self.distance, self.switch, self.port)
+    }
+}
+
 #[derive(Debug)]
 pub struct Switch{
     pub name: String,
@@ -53,7 +59,10 @@ impl Switch{
         self.ports_states.insert(port, PortState::Designated);
     }
 
-    pub fn receive_bpdu(&mut self, bpdu: BPDU, port: u32, distance: u32){
+    pub fn receive_bpdu(&mut self, bpdu: BPDU, port: u32, distance: u32, verbose: bool){
+        if verbose{
+            println!("Switch {} received BPDU {} on port {}", self.name, bpdu.to_string(), port);
+        }
         let prev = self.ports.get(&port);
         if let Some(prev_bpdu) = prev{
             if prev_bpdu < &bpdu{
@@ -65,24 +74,42 @@ impl Switch{
         self.update_best(BPDU{root: bpdu.root, distance: bpdu.distance+distance, switch: id, port: 0}, port);
         if self.root_port == port{
             // updated root, resend my bpdu to all neighbors
-            self.send_bpdu();
+            if verbose{
+                println!("Updated own BPDU to {} and port {} became new root", self.bpdu.to_string(), port)
+            }
+            self.send_bpdu(verbose);
             return;
         }
         if bpdu < self.bpdu{
+            if verbose{
+                println!("BPDU received was better than self bpdu ({}), port {} becomes blocked", self.bpdu.to_string(), port)
+            }
             self.ports_states.insert(port, PortState::Blocked);
         }else{
+            if verbose{
+                println!("BPDU received was worse than self bpdu ({}), port {} becomes designated", self.bpdu.to_string(), port)
+            }
             self.ports_states.insert(port, PortState::Designated);
         }
     }
 
-    pub fn send_bpdu(&self){
+    pub fn send_bpdu(&self, verbose: bool){
         for (port, (other, other_port, cost)) in self.neighbors.iter() {
             let borrowed = other.try_borrow();
-            if self.get_port_state(*port) != PortState::Designated || borrowed.is_err()|| borrowed.unwrap().id == self.bpdu.root{
+            if self.get_port_state(*port) != PortState::Designated || borrowed.is_err(){
                 // either we can't send a bpdu on this port, or it generated a cycle for rust borrows, no point to continue
                 continue;
             }
-            other.borrow_mut().receive_bpdu(BPDU{root: self.bpdu.root, distance: self.bpdu.distance, switch: self.id, port: *port}, *other_port, *cost);
+            let borrowed = borrowed.unwrap();
+            if borrowed.id == self.bpdu.root{
+                continue;
+            }
+            let bpdu = BPDU{root: self.bpdu.root, distance: self.bpdu.distance, switch: self.id, port: *port};
+            if verbose{
+                println!("Switch {} sending BPDU {} to {}", self.name, bpdu.to_string(), borrowed.name)
+            }
+            drop(borrowed);
+            other.borrow_mut().receive_bpdu(bpdu, *other_port, *cost, verbose);
         }
     }
 

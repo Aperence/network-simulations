@@ -38,9 +38,14 @@ impl Network{
         s2.borrow_mut().add_link(port2, Rc::clone(&s1), port1, cost);
     }
 
-    pub fn run(&self){
+    pub fn run(&self, verbose: bool){
+        if verbose{
+            for (_, switch) in self.switches.iter(){
+                println!("Initial BPDU for switch {} : {}", switch.borrow().name, switch.borrow().bpdu.to_string());
+            }
+        }
         for (_, switch) in self.switches.iter(){
-            switch.borrow().send_bpdu();
+            switch.borrow().send_bpdu(verbose);
         }
     }
 

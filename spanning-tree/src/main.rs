@@ -21,7 +21,7 @@ fn main() {
     network.add_link("s4".into(), 3, "s5".into(), 1, 1);
     network.add_link("s5".into(), 2, "s2".into(), 3, 1);
 
-    network.run();
+    network.run(true);
 
     network.print_switch_states();
     network.print_dot();
