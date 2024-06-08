@@ -1,10 +1,14 @@
 
 pub mod network;
 
+use std::{thread, time::Duration};
+
 use self::network::Network;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
+    env_logger::init(); // you can run using `RUST_LOG=debug cargo run` to get more details on what messages the switches are exchanging
+
     let mut network = Network::new();
     network.add_switch("s1".into(), 1);
     network.add_switch("s2".into(), 2);
@@ -22,13 +26,13 @@ async fn main() -> Result<(), ()> {
     network.add_link("s9".into(), 4, "s6".into(), 1, 1).await;
     network.add_link("s3".into(), 3, "s6".into(), 2, 1).await;
 
-
-    network.run(true, true).await;
-
-    network.wait_end().await;
+    // wait for convergence
+    thread::sleep(Duration::from_millis(250));
 
     network.print_switch_states().await;
-    //network.print_dot().await;
+    network.print_dot().await;
+
+    network.quit().await;
 
     Ok(())
 }
