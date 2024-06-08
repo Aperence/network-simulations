@@ -1,4 +1,7 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use tokio::sync::{mpsc::{error::TryRecvError, Receiver, Sender}, Mutex};
+
+const CONVERGE_DELAY_MILLIS: u128 = 250;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PortState{
@@ -35,36 +38,73 @@ impl ToString for BPDU{
 pub struct Switch{
     pub name: String,
     pub id: u32,
-    pub neighbors: HashMap<u32, (Rc<RefCell<Switch>>, u32, u32)>,  // (port, (switch, other_port, cost))
+    pub neighbors: HashMap<u32, (Sender<BPDU>, u32)>,
     pub bpdu: BPDU,
     pub root_port: u32,
     pub ports: HashMap<u32, (BPDU, u32)>,
-    pub ports_states: HashMap<u32, PortState>
+    pub ports_states: HashMap<u32, PortState>,
+    pub converged_sender: Option<Sender<()>>,
+    pub prev_time: Option<SystemTime>
 }
 
 impl ToString for Switch{
     fn to_string(&self) -> String{
-        let neighbors: Vec<String> = self.neighbors.iter().map(|(k,(other, other_port, _dist))| format!("{}={}:{}", k, other.borrow().name, other_port)).collect();
-        format!("Switch {}{{neighbors : [{}]}}", self.name, neighbors.join(", "))
+        format!("Switch {}", self.name)
     }
 }
 
 impl Switch{
     pub fn new(name: String, id: u32) -> Switch{
-        Switch{name, id, neighbors: HashMap::new(), ports: HashMap::new(), ports_states: HashMap::new(), root_port: 0, bpdu: BPDU{root: id, distance: 0, switch: id, port: 0}}
+        Switch{name, id, neighbors: HashMap::new(), ports: HashMap::new(), ports_states: HashMap::new(), root_port: 0, bpdu: BPDU{root: id, distance: 0, switch: id, port: 0}, converged_sender: None, prev_time: None}
     }
 
-    pub fn add_link(&mut self, port: u32, other: Rc<RefCell<Switch>>, other_port: u32, cost: u32){
-        self.neighbors.insert(port, (other, other_port, cost));
-        self.ports_states.insert(port, PortState::Designated);
+    pub fn set_converged_sender(&mut self, sender: Sender<()>){
+        self.converged_sender = Some(sender);
+        self.prev_time = Some(SystemTime::now());
     }
 
-    pub fn receive_bpdu(&mut self, bpdu: BPDU, port: u32, distance: u32, verbose: bool){
+    pub async fn add_link(switch: Arc<Mutex<Switch>>, port: u32, receiver: Receiver<BPDU>, other_sender: Sender<BPDU>, cost: u32){
+        let cloned = switch.clone();
+        switch.lock().await.neighbors.insert(port, (other_sender, cost));
+        switch.lock().await.ports_states.insert(port, PortState::Designated);
+        tokio::spawn(async move {
+            Self::receive_loop(cloned, receiver, port, cost).await;
+        });
+    }
+
+    pub async fn receive_loop(switch: Arc<Mutex<Switch>>, mut receiver: Receiver<BPDU>, port: u32, cost: u32){
+        let mut done = false;
+        while !done{
+            match receiver.try_recv(){
+                Ok(bpdu) => {
+                    let mut switch = switch.lock().await;
+                    switch.prev_time = Some(SystemTime::now());
+                    switch.receive_bpdu(bpdu, port, cost, true).await;
+                },
+                Err(TryRecvError::Disconnected) => done = true,
+                Err(TryRecvError::Empty) => {
+                    let switch = switch.lock().await;
+                    if let Some(time) = switch.prev_time{
+                        match time.elapsed(){
+                            Ok(t) => done = t.as_millis() > CONVERGE_DELAY_MILLIS,
+                            Err(_) => (),
+                        }
+                    }
+                }
+            }
+        }
+        let mut switch = switch.lock().await;
+        switch.neighbors.clear(); // drop senders
+        let sender = switch.converged_sender.clone().unwrap();
+        sender.send(()).await.unwrap();
+    }
+
+    pub async fn receive_bpdu(&mut self, bpdu: BPDU, port: u32, distance: u32, verbose: bool){
         if verbose{
             println!("Switch {} received BPDU {} on port {}", self.name, bpdu.to_string(), port);
         }
         let prev = self.ports.get(&port);
-        if let Some((prev_bpdu, dist)) = prev{
+        if let Some((prev_bpdu, _)) = prev{
             if prev_bpdu < &bpdu{
                 return;
             }
@@ -74,7 +114,7 @@ impl Switch{
         self.update_state_port(port, verbose);
         // updated root, resend my bpdu to all neighbors
         if self.root_port == port{
-            self.send_bpdu(verbose);
+            self.send_bpdu(verbose).await;
         }
     }
 
@@ -100,23 +140,17 @@ impl Switch{
         }
     }
 
-    pub fn send_bpdu(&self, verbose: bool){
-        for (port, (other, other_port, cost)) in self.neighbors.iter() {
-            let borrowed = other.try_borrow_mut();
-            if self.get_port_state(*port) != PortState::Designated || borrowed.is_err(){
+    pub async fn send_bpdu(&self, verbose: bool){
+        for (port, (sender, _)) in self.neighbors.iter() {
+            if self.get_port_state(*port) != PortState::Designated{
                 // either we can't send a bpdu on this port, or it generated a cycle for rust borrows, no point to continue
-                continue;
-            }
-            let borrowed = borrowed.unwrap();
-            if borrowed.id == self.bpdu.root{
                 continue;
             }
             let bpdu = BPDU{root: self.bpdu.root, distance: self.bpdu.distance, switch: self.id, port: *port};
             if verbose{
-                println!("Switch {} sending BPDU {} to {}", self.name, bpdu.to_string(), borrowed.name)
+                println!("Switch {} sending BPDU {} on port {}", self.name, bpdu.to_string(), port)
             }
-            drop(borrowed);
-            other.borrow_mut().receive_bpdu(bpdu, *other_port, *cost, verbose);
+            sender.send(bpdu).await.unwrap();
         }
     }
 
