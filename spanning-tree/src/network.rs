@@ -38,14 +38,24 @@ impl Network{
         s2.borrow_mut().add_link(port2, Rc::clone(&s1), port1, cost);
     }
 
-    pub fn run(&self, verbose: bool){
+    pub fn run(&self, verbose: bool, start_directly_from_root: bool){
         if verbose{
             for (_, switch) in self.switches.iter(){
                 println!("Initial BPDU for switch {} : {}", switch.borrow().name, switch.borrow().bpdu.to_string());
             }
         }
-        for (_, switch) in self.switches.iter(){
-            switch.borrow().send_bpdu(verbose);
+        if start_directly_from_root{
+            let mut switch_lowest_id: Option<&Rc<RefCell<Switch>>> = None;
+            for (_, switch) in self.switches.iter(){
+                if switch_lowest_id.is_none() || switch_lowest_id.unwrap().borrow().id > switch.borrow().id{
+                    switch_lowest_id = Some(switch);
+                }
+            }
+            switch_lowest_id.unwrap().borrow().send_bpdu(verbose);
+        }else{
+            for (_, switch) in self.switches.iter(){
+                switch.borrow().send_bpdu(verbose);
+            }
         }
     }
 
