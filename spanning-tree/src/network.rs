@@ -3,6 +3,7 @@ pub mod router;
 pub mod communicators;
 pub mod logger;
 pub mod messages;
+pub mod protocols;
 use logger::{Logger, Source};
 use switch::PortState;
 use tokio::sync::mpsc::channel;
@@ -126,117 +127,126 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn test_spanning_tree() {
-        let mut network = Network::new();
-        network.add_switch("s1".into(), 1);
-        network.add_switch("s2".into(), 2);
-        network.add_switch("s3".into(), 3);
-        network.add_switch("s4".into(), 4);
-        network.add_switch("s6".into(), 6);
-        network.add_switch("s9".into(), 9);
-    
-        network.add_link("s1".into(), 1, "s2".into(), 1, 1).await;
-        network.add_link("s1".into(), 2, "s4".into(), 1, 1).await;
-        network.add_link("s2".into(), 2, "s9".into(), 1, 1).await;
-        network.add_link("s4".into(), 2, "s9".into(), 2, 1).await;
-        network.add_link("s4".into(), 3, "s3".into(), 1, 1).await;
-        network.add_link("s9".into(), 3, "s3".into(), 2, 1).await;
-        network.add_link("s9".into(), 4, "s6".into(), 1, 1).await;
-        network.add_link("s3".into(), 3, "s6".into(), 2, 1).await;
-    
-        // wait for convergence
-        thread::sleep(Duration::from_millis(250));
+        for _ in 0..10{
+            let mut network = Network::new();
+            network.add_switch("s1".into(), 1);
+            network.add_switch("s2".into(), 2);
+            network.add_switch("s3".into(), 3);
+            network.add_switch("s4".into(), 4);
+            network.add_switch("s6".into(), 6);
+            network.add_switch("s9".into(), 9);
+        
+            network.add_link("s1".into(), 1, "s2".into(), 1, 1).await;
+            network.add_link("s1".into(), 2, "s4".into(), 1, 1).await;
+            network.add_link("s2".into(), 2, "s9".into(), 1, 1).await;
+            network.add_link("s4".into(), 2, "s9".into(), 2, 1).await;
+            network.add_link("s4".into(), 3, "s3".into(), 1, 1).await;
+            network.add_link("s9".into(), 3, "s3".into(), 2, 1).await;
+            network.add_link("s9".into(), 4, "s6".into(), 1, 1).await;
+            network.add_link("s3".into(), 3, "s6".into(), 2, 1).await;
+        
+            // wait for convergence
+            thread::sleep(Duration::from_millis(250));
 
-        let switch_states = network.get_port_states().await;
-    
-        let mut expected: BTreeMap<String, BTreeMap<u32, PortState>> = BTreeMap::new();
-        expected.insert("s1".into(), [(1, Designated), (2, Designated)].into_iter().collect());
-        expected.insert("s2".into(), [(1, Root), (2, Designated)].into_iter().collect());
-        expected.insert("s3".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
-        expected.insert("s4".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
-        expected.insert("s6".into(), [(1, Blocked), (2, Root)].into_iter().collect());
-        expected.insert("s9".into(), [(1, Root), (2, Blocked), (3, Blocked), (4, Designated)].into_iter().collect());
+            let switch_states = network.get_port_states().await;
+        
+            let mut expected: BTreeMap<String, BTreeMap<u32, PortState>> = BTreeMap::new();
+            expected.insert("s1".into(), [(1, Designated), (2, Designated)].into_iter().collect());
+            expected.insert("s2".into(), [(1, Root), (2, Designated)].into_iter().collect());
+            expected.insert("s3".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
+            expected.insert("s4".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
+            expected.insert("s6".into(), [(1, Blocked), (2, Root)].into_iter().collect());
+            expected.insert("s9".into(), [(1, Root), (2, Blocked), (3, Blocked), (4, Designated)].into_iter().collect());
 
-        assert_eq!(expected, switch_states);
-    
-        network.quit().await;
+            assert_eq!(expected, switch_states);
+        
+            network.quit().await;
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn test_ospf() {
-        let mut network = Network::new_with_filters(vec![Source::Ping]);
-        network.add_router("r1".into(), 1);
-        network.add_router("r2".into(), 2);
-        network.add_router("r3".into(), 3);
-        network.add_router("r4".into(), 4);
-    
-        network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
-        network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
-        network.add_link("r3".into(), 3, "r4".into(), 1, 1).await;
-        network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
-    
-        // wait for convergence
-        thread::sleep(Duration::from_millis(250));
+        for _ in 0..10{
+            let mut network = Network::new_with_filters(vec![Source::Ping]);
+            network.add_router("r1".into(), 1);
+            network.add_router("r2".into(), 2);
+            network.add_router("r3".into(), 3);
+            network.add_router("r4".into(), 4);
+        
+            network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
+            network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
+            network.add_link("r3".into(), 3, "r4".into(), 1, 1).await;
+            network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
+        
+            // wait for convergence
+            thread::sleep(Duration::from_millis(250));
 
-        assert_eq!(network.get_routing_table("r1".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (1, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
-            ].into_iter().collect());
+            assert_eq!(network.get_routing_table("r1".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (1, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
+                ].into_iter().collect());
 
-        assert_eq!(network.get_routing_table("r2".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (0, 0)), 
-            (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
-            ].into_iter().collect());
+            assert_eq!(network.get_routing_table("r2".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (0, 0)), 
+                (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
+                ].into_iter().collect());
 
-        assert_eq!(network.get_routing_table("r3".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (2, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 3), (0, 0)), 
-            (Ipv4Addr::new(10, 0, 0, 4), (3, 1))
-            ].into_iter().collect());
+            assert_eq!(network.get_routing_table("r3".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (2, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 3), (0, 0)), 
+                (Ipv4Addr::new(10, 0, 0, 4), (3, 1))
+                ].into_iter().collect());
 
-        assert_eq!(network.get_routing_table("r4".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (1, 2)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (1, 2)), 
-            (Ipv4Addr::new(10, 0, 0, 3), (1, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 4), (0, 0))
-            ].into_iter().collect());
-    
-        network.quit().await;
+            assert_eq!(network.get_routing_table("r4".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (1, 2)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (1, 2)), 
+                (Ipv4Addr::new(10, 0, 0, 3), (1, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 4), (0, 0))
+                ].into_iter().collect());
+        
+            network.quit().await;
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn test_mix_switches_routers() {
-        let mut network = Network::new_with_filters(vec![Source::Ping]);
-        network.add_router("r1".into(), 1);
-        network.add_router("r2".into(), 2);
-        network.add_switch("s1".into(), 11);
-        network.add_switch("s2".into(), 12);
-        network.add_switch("s3".into(), 13);
-    
-        network.add_link("r1".into(), 1, "s1".into(), 1, 1).await;
-        network.add_link("s1".into(), 2, "s2".into(), 1, 1).await;
-        network.add_link("s2".into(), 2, "s3".into(), 1, 1).await;
-        network.add_link("s3".into(), 2, "r2".into(), 1, 1).await;
-    
-        // wait for convergence
-        thread::sleep(Duration::from_millis(500));
-    
-        assert_eq!(network.get_routing_table("r1".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (1, 1))
-            ].into_iter().collect());
-
-        assert_eq!(network.get_routing_table("r2".into()).await, [
-            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
-            (Ipv4Addr::new(10, 0, 0, 2), (0, 0))
-            ].into_iter().collect());
-    
-        thread::sleep(Duration::from_millis(250));
-    
-        network.quit().await;
+        for _ in 0..10{
+            let mut network = Network::new_with_filters(vec![]);
+            network.add_router("r1".into(), 1);
+            network.add_router("r2".into(), 2);
+            network.add_switch("s1".into(), 11);
+            network.add_switch("s2".into(), 12);
+            network.add_switch("s3".into(), 13);
+            network.add_switch("s4".into(), 14);
+        
+            network.add_link("r1".into(), 1, "s1".into(), 1, 1).await;
+            network.add_link("s1".into(), 2, "s2".into(), 1, 1).await;
+            network.add_link("s2".into(), 2, "s3".into(), 1, 1).await;
+            network.add_link("s4".into(), 1, "s3".into(), 3, 1).await;
+            network.add_link("s4".into(), 2, "s1".into(), 3, 1).await;
+            network.add_link("s3".into(), 2, "r2".into(), 1, 1).await;
+        
+            // wait for convergence
+            thread::sleep(Duration::from_millis(250));
+        
+            assert_eq!(network.get_routing_table("r1".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (1, 1))
+                ].into_iter().collect());
+        
+            assert_eq!(network.get_routing_table("r2".into()).await, [
+                (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+                (Ipv4Addr::new(10, 0, 0, 2), (0, 0))
+                ].into_iter().collect());
+        
+            thread::sleep(Duration::from_millis(250));
+        
+            network.quit().await;
+        }
     }
 }
