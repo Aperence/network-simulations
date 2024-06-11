@@ -111,15 +111,29 @@ impl Switch{
     }
 
     pub async fn receive_ports(&mut self){
-        let mut received_messages = vec![];
+        let mut received_bpdus = vec![];
+        let mut received_messages= vec![];
         for (port, receiver, _, cost) in self.neighbors.iter(){
             let mut receiver = receiver.lock().await;
-            if let Ok(Message::BPDU(bpdu)) = receiver.try_recv(){
-                received_messages.push((bpdu, *port, *cost));
+            match receiver.try_recv(){
+                Ok(Message::BPDU(bpdu)) => received_bpdus.push((bpdu, *port, *cost)),
+                Ok(message) => {
+                    if self.get_port_state(*port) != PortState::Blocked{
+                        received_messages.push((*port, message))
+                    }
+                }
+                Err(_) => continue,
             }
         }
-        for (bpdu, port, cost) in received_messages{
+        for (bpdu, port, cost) in received_bpdus{
             self.receive_bpdu(bpdu, port, cost).await;
+        }
+        for (port, message) in received_messages{
+            for (p, _, sender, _) in self.neighbors.iter(){
+                if port != *p && self.get_port_state(*p) != PortState::Blocked{
+                    sender.send(message.clone()).await.expect("Failed to broadcast message");
+                }
+            }
         }
     }
 

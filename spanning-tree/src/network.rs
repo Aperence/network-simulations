@@ -160,4 +160,83 @@ mod tests {
     
         network.quit().await;
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn test_ospf() {
+        let mut network = Network::new_with_filters(vec![Source::Ping]);
+        network.add_router("r1".into(), 1);
+        network.add_router("r2".into(), 2);
+        network.add_router("r3".into(), 3);
+        network.add_router("r4".into(), 4);
+    
+        network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
+        network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
+        network.add_link("r3".into(), 3, "r4".into(), 1, 1).await;
+        network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
+    
+        // wait for convergence
+        thread::sleep(Duration::from_millis(250));
+
+        assert_eq!(network.get_routing_table("r1".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (1, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
+            ].into_iter().collect());
+
+        assert_eq!(network.get_routing_table("r2".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (0, 0)), 
+            (Ipv4Addr::new(10, 0, 0, 3), (2, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 4), (2, 2))
+            ].into_iter().collect());
+
+        assert_eq!(network.get_routing_table("r3".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (2, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 3), (0, 0)), 
+            (Ipv4Addr::new(10, 0, 0, 4), (3, 1))
+            ].into_iter().collect());
+
+        assert_eq!(network.get_routing_table("r4".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (1, 2)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (1, 2)), 
+            (Ipv4Addr::new(10, 0, 0, 3), (1, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 4), (0, 0))
+            ].into_iter().collect());
+    
+        network.quit().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn test_mix_switches_routers() {
+        let mut network = Network::new_with_filters(vec![Source::Ping]);
+        network.add_router("r1".into(), 1);
+        network.add_router("r2".into(), 2);
+        network.add_switch("s1".into(), 11);
+        network.add_switch("s2".into(), 12);
+        network.add_switch("s3".into(), 13);
+    
+        network.add_link("r1".into(), 1, "s1".into(), 1, 1).await;
+        network.add_link("s1".into(), 2, "s2".into(), 1, 1).await;
+        network.add_link("s2".into(), 2, "s3".into(), 1, 1).await;
+        network.add_link("s3".into(), 2, "r2".into(), 1, 1).await;
+    
+        // wait for convergence
+        thread::sleep(Duration::from_millis(500));
+    
+        assert_eq!(network.get_routing_table("r1".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (0, 0)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (1, 1))
+            ].into_iter().collect());
+
+        assert_eq!(network.get_routing_table("r2".into()).await, [
+            (Ipv4Addr::new(10, 0, 0, 1), (1, 1)), 
+            (Ipv4Addr::new(10, 0, 0, 2), (0, 0))
+            ].into_iter().collect());
+    
+        thread::sleep(Duration::from_millis(250));
+    
+        network.quit().await;
+    }
 }

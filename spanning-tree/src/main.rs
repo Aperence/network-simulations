@@ -14,25 +14,21 @@ async fn main() -> Result<(), ()> {
     let mut network = Network::new_with_filters(vec![Source::Ping]);
     network.add_router("r1".into(), 1);
     network.add_router("r2".into(), 2);
-    network.add_router("r3".into(), 3);
-    network.add_router("r4".into(), 4);
+    network.add_switch("s1".into(), 11);
+    network.add_switch("s2".into(), 12);
+    network.add_switch("s3".into(), 13);
 
-    network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
-    network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
-    network.add_link("r3".into(), 3, "r4".into(), 1, 1).await;
-    network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
+    network.add_link("r1".into(), 1, "s1".into(), 1, 1).await;
+    network.add_link("s1".into(), 2, "s2".into(), 1, 1).await;
+    network.add_link("s2".into(), 2, "s3".into(), 1, 1).await;
+    network.add_link("s3".into(), 2, "r2".into(), 1, 1).await;
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(500));
 
-    network.ping("r1".into(), Ipv4Addr::new(10, 0, 0, 4)).await;
+    network.ping("r1".into(), Ipv4Addr::new(10, 0, 0, 2)).await;
 
-    for (dest, (port, dist)) in network.get_routing_table("r1".into()).await{
-        println!("{} : dist={}, port={}", dest, dist, port);
-    }
-    
-
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(500));
 
     network.quit().await;
 
