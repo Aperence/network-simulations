@@ -1,7 +1,9 @@
 
 pub mod network;
 
-use std::{thread, time::Duration};
+use std::{net::Ipv4Addr, thread, time::Duration};
+
+use network::logger::Source;
 
 use self::network::Network;
 
@@ -9,7 +11,7 @@ use self::network::Network;
 async fn main() -> Result<(), ()> {
     env_logger::init(); // you can run using `RUST_LOG=debug cargo run` to get more details on what messages the switches are exchanging
 
-    let mut network = Network::new();
+    let mut network = Network::new_with_filters(vec![Source::Ping]);
     network.add_router("r1".into(), 1);
     network.add_router("r2".into(), 2);
     network.add_router("r3".into(), 3);
@@ -21,6 +23,15 @@ async fn main() -> Result<(), ()> {
     network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
 
     // wait for convergence
+    thread::sleep(Duration::from_millis(250));
+
+    network.ping("r1".into(), Ipv4Addr::new(10, 0, 0, 4)).await;
+
+    for (dest, (port, dist)) in network.get_routing_table("r1".into()).await{
+        println!("{} : dist={}, port={}", dest, dist, port);
+    }
+    
+
     thread::sleep(Duration::from_millis(250));
 
     network.quit().await;

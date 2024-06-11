@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::{BTreeMap, HashMap}, rc::Rc, sync::Arc, time::SystemTime};
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
-use log::info;
 
-use super::messages::{Message, bpdu::BPDU};
+use super::{logger::{Logger, Source}, messages::{bpdu::BPDU, Message}};
 use super::communicators::{SwitchCommunicator, Command, Response};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,7 +33,8 @@ pub struct Switch{
     pub ports: HashMap<u32, (BPDU, u32)>,
     pub ports_states: HashMap<u32, PortState>,
     pub command_receiver: Receiver<Command>,
-    pub command_replier: Sender<Response>
+    pub command_replier: Sender<Response>,
+    pub logger: Logger
 }
 
 impl ToString for Switch{
@@ -45,7 +45,7 @@ impl ToString for Switch{
 
 impl Switch{
 
-    pub fn start(name: String, id: u32) -> SwitchCommunicator{
+    pub fn start(name: String, id: u32, logger: Logger) -> SwitchCommunicator{
         let (tx_command, rx_command) = channel(1024);
         let (tx_response, rx_response) = channel(1024);
         let mut switch = Switch{
@@ -58,6 +58,7 @@ impl Switch{
             bpdu: BPDU{root: id, distance: 0, switch: id, port: 0}, 
             command_receiver: rx_command,
             command_replier: tx_response,
+            logger
         };
         tokio::spawn(async move {
             switch.run().await;
@@ -66,7 +67,7 @@ impl Switch{
     }
 
     pub async fn run(&mut self){
-        info!("Init BPDU for switch {} : {}", self.name, self.bpdu.to_string());
+        self.logger.log(Source::SPT, format!("Init BPDU for switch {} : {}", self.name, self.bpdu.to_string())).await;
         let mut time = SystemTime::now();
         loop{
             if self.receive_command().await{
@@ -101,6 +102,8 @@ impl Switch{
                         false
                     },
                     Command::Quit => true,
+                    Command::Ping(_) => panic!("Ping not supported on switch"),
+                    Command::RoutingTable => panic!("RoutingTable not supported on switch"),
                 }
             },
             Err(_) => false,
@@ -121,7 +124,7 @@ impl Switch{
     }
 
     pub async fn receive_bpdu(&mut self, bpdu: BPDU, port: u32, distance: u32){
-        info!("Switch {} received BPDU {} on port {}", self.name, bpdu.to_string(), port);
+        self.logger.log(Source::SPT, format!("Switch {} received BPDU {} on port {}", self.name, bpdu.to_string(), port)).await;
         let prev = self.ports.get(&port);
         if let Some((prev_bpdu, _)) = prev{
             if prev_bpdu < &bpdu{
@@ -129,15 +132,15 @@ impl Switch{
             }
         }
         self.ports.insert(port, (bpdu.clone(), distance));
-        self.update_best(BPDU{root: bpdu.root, distance: bpdu.distance+distance, switch: bpdu.switch, port: bpdu.port}, port);
-        self.update_state_port(port);
+        self.update_best(BPDU{root: bpdu.root, distance: bpdu.distance+distance, switch: bpdu.switch, port: bpdu.port}, port).await;
+        self.update_state_port(port).await;
         // updated root, resend my bpdu to all neighbors
         if self.root_port == port{
             self.send_bpdu().await;
         }
     }
 
-    fn update_state_port(&mut self, port: u32){
+    async fn update_state_port(&mut self, port: u32){
         let bpdu = self.ports.get(&port);
         if bpdu.is_none(){
             return;
@@ -146,10 +149,10 @@ impl Switch{
         if port == self.root_port{
             self.ports_states.insert(port, PortState::Root);
         }else if bpdu < &self.bpdu{
-            info!("BPDU received ({}) by {} on port {} was better than self bpdu ({}), port {} becomes blocked", bpdu.to_string(), self.name, port, self.bpdu.to_string(), port);
+            self.logger.log(Source::SPT, format!("BPDU received ({}) by {} on port {} was better than self bpdu ({}), port {} becomes blocked", bpdu.to_string(), self.name, port, self.bpdu.to_string(), port)).await;
             self.ports_states.insert(port, PortState::Blocked);
         }else{
-            info!("BPDU received ({}) by {} on port {} was worse than self bpdu ({}), port {} becomes designated", bpdu.to_string(), self.name, port, self.bpdu.to_string(), port);
+            self.logger.log(Source::SPT, format!("BPDU received ({}) by {} on port {} was worse than self bpdu ({}), port {} becomes designated", bpdu.to_string(), self.name, port, self.bpdu.to_string(), port)).await;
             self.ports_states.insert(port, PortState::Designated);
         }
     }
@@ -161,7 +164,7 @@ impl Switch{
                 continue;
             }
             let bpdu = BPDU{root: self.bpdu.root, distance: self.bpdu.distance, switch: self.id, port: *port};
-            info!("Switch {} sending BPDU {} on port {}", self.name, bpdu.to_string(), port);
+            self.logger.log(Source::SPT, format!("Switch {} sending BPDU {} on port {}", self.name, bpdu.to_string(), port)).await;
             sender.send(Message::BPDU(bpdu)).await.unwrap();
         }
     }
@@ -174,7 +177,7 @@ impl Switch{
         ports
     }
 
-    fn update_best(&mut self, bpdu: BPDU, port: u32){
+    async fn update_best(&mut self, bpdu: BPDU, port: u32){
         let default = (self.bpdu.clone(), 0);
         let (previous_best, cost) = self.ports.get(&self.root_port).unwrap_or(&default);
         
@@ -185,9 +188,9 @@ impl Switch{
         if update{
             self.bpdu = BPDU{root: bpdu.root, distance: bpdu.distance, switch: self.id, port: 0};
             self.root_port = port;
-            info!("Updated BPDU of switch {} to {} and port {} became new root", self.name, self.bpdu.to_string(), port);
+            self.logger.log(Source::SPT, format!("Updated BPDU of switch {} to {} and port {} became new root", self.name, self.bpdu.to_string(), port)).await;
             for port in self.get_ports(){
-                self.update_state_port(port);
+                self.update_state_port(port).await;
             }
         }
     }

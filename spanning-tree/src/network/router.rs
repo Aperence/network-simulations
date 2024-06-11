@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet}, net::Ipv4Addr, rc::Rc, sync::Arc, time::SystemTime};
-use log::info;
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
-use super::messages::{ospf::OSPFMessage, Message};
+use super::{logger::{Logger, Source}, messages::{ospf::OSPFMessage, DebugMessage, Message}};
 use super::messages::ospf::OSPFMessage::{Hello, HelloReply, LSP};
 use super::communicators::{RouterCommunicator, Command, Response};
 
@@ -33,7 +32,8 @@ pub struct Router{
     pub direct_neighbors: HashSet<(u32, u32, Ipv4Addr)>,
     pub routing_table: HashMap<Ipv4Addr, (u32, u32)>,
     pub received_lsp: HashSet<(Ipv4Addr, u32)>,
-    pub lsp_seq: u32
+    pub lsp_seq: u32,
+    pub logger: Logger
 }
 
 impl ToString for Router{
@@ -44,7 +44,7 @@ impl ToString for Router{
 
 impl Router{
 
-    pub fn start(name: String, id: u32) -> RouterCommunicator{
+    pub fn start(name: String, id: u32, logger: Logger) -> RouterCommunicator{
         let (tx_command, rx_command) = channel(1024);
         let (tx_response, rx_response) = channel(1024);
         let mut router = Router{
@@ -58,7 +58,8 @@ impl Router{
             direct_neighbors: HashSet::new(),
             routing_table: HashMap::new(),
             received_lsp: HashSet::new(),
-            lsp_seq: 0
+            lsp_seq: 0,
+            logger
         };
         router.routing_table.insert(router.ip, (0, 0));
         tokio::spawn(async move {
@@ -92,11 +93,39 @@ impl Router{
             }
         }
         for (message, port, _cost) in received_messages{
-            info!("Router {} received {:?}", self.name, message);
+            self.logger.log(Source::Debug, format!("Router {} received {:?}", self.name, message)).await;
             match message{
                 Message::BPDU(_) => (), // don't care about bdpus
                 Message::OSPF(ospf) => self.process_ospf(ospf, port).await,
+                Message::Debug(debug) => self.process_debug(debug).await,
             }
+        }
+    }
+
+    pub async fn process_debug(&self, debug: DebugMessage){
+        match debug{
+            DebugMessage::Ping(from, to) => {
+                if to == self.ip{
+                    self.logger.log(Source::Ping, format!("Router {} received ping from {}", self.name, from)).await;
+                    self.send_message(from, Message::Debug(DebugMessage::Pong(to, from))).await;
+                }else{
+                    self.send_message(to, Message::Debug(debug)).await;
+                }
+            },
+            DebugMessage::Pong(_, to) => {
+                if to == self.ip{
+                    self.logger.log(Source::Ping, format!("Router {} received ping back from {}", self.name, to)).await;
+                    return
+                }
+                self.send_message(to, Message::Debug(debug)).await;
+            },
+        }
+    }
+
+    pub async fn send_message(&self, dest: Ipv4Addr, message: Message){
+        if let Some((port, _)) = self.routing_table.get(&dest){
+            let (_, sender, _) = self.neighbors.get(port).unwrap();
+            sender.send(message).await.unwrap();
         }
     }
 
@@ -131,7 +160,7 @@ impl Router{
                 }
             }
         }
-        info!("Router {} has updated its routing table : {:?}", self.name, self.routing_table);
+        self.logger.log(Source::Debug, format!("Router {} has updated its routing table : {:?}", self.name, self.routing_table)).await;
     }
 
     pub async fn process_lsp(&mut self, from: Ipv4Addr, seq: u32, neighbors: HashSet<(u32, Ipv4Addr)>){
@@ -146,14 +175,13 @@ impl Router{
 
         values.extend(neighbors.iter());
         self.shortest_path().await;
-        info!("Topology of {} : {:?}", self.name, self.topo);
 
         self.send_lsp(OSPFMessage::LSP(from, seq, neighbors)).await; // flood
     }
 
     pub async fn send_lsp(&mut self, lsp: OSPFMessage){
         for (port, (_, sender, _)) in self.neighbors.iter() {
-            info!("Router {} sending {:?} on port {}", self.name, lsp, port);
+            self.logger.log(Source::OSPF, format!("Router {} sending {:?} on port {}", self.name, lsp, port)).await;
             sender.send(Message::OSPF(lsp.clone())).await.unwrap();
         }
     }
@@ -161,7 +189,7 @@ impl Router{
     pub async fn process_hello_reply(&mut self, ip: Ipv4Addr, port: u32){
         let (_, _, cost) = self.neighbors.get(&port).unwrap();
         self.direct_neighbors.insert((*cost, port, ip));
-        info!("Router {} has neighbors : {:?}", self.name, self.direct_neighbors);
+        self.logger.log(Source::OSPF, format!("Router {} has neighbors : {:?}", self.name, self.direct_neighbors)).await;
         self.routing_table.insert(ip, (port, *cost));
 
         let values = match self.topo.entry(self.ip) {
@@ -171,7 +199,7 @@ impl Router{
 
         values.insert((*cost, ip));
         
-        info!("Router {} received prefix {} from neighbor on port {}", self.name, ip, port);
+        self.logger.log(Source::OSPF, format!("Router {} received prefix {} from neighbor on port {}", self.name, ip, port)).await;
         let seq = self.lsp_seq;
         self.lsp_seq+=1;
         let mut neighs = HashSet::new();
@@ -184,15 +212,20 @@ impl Router{
     pub async fn send_hello(&self){
         for (port, (_, sender, _)) in self.neighbors.iter() {
             let msg = Message::OSPF(Hello);
-            info!("Router {} sending Hello on port {}", self.name, port);
+            self.logger.log(Source::OSPF, format!("Router {} sending Hello on port {}", self.name, port)).await;
             sender.send(msg).await.unwrap();
         }
     }
 
     pub async fn send_hello_reply(&self, port: u32){
         let (_, sender, _) = self.neighbors.get(&port).unwrap();
-        info!("Router {} sending hello reply on port {}", self.name, port);
+        self.logger.log(Source::OSPF, format!("Router {} sending hello reply on port {}", self.name, port)).await;
         sender.send(Message::OSPF(OSPFMessage::HelloReply(self.ip))).await.expect("Failed to send Hello reply");
+    }
+
+    pub async fn send_ping(&self, dest: Ipv4Addr){
+        self.logger.log(Source::Ping, format!("Router {} sending ping message to {}", self.name, dest)).await;
+        self.send_message(dest, Message::Debug(DebugMessage::Ping(self.ip, dest))).await;
     }
 
     pub async fn receive_command(&mut self) -> bool{
@@ -200,13 +233,21 @@ impl Router{
             Ok(command) => {
                 match command{
                     Command::AddLink(receiver, sender, port, cost) => {
-                        info!("Router {} received adding link", self.name);
+                        self.logger.log(Source::Debug, format!("Router {} received adding link", self.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         self.neighbors.insert(port, (receiver, sender, cost));
                         false
                     },
                     Command::Quit => true,
                     Command::StatePorts => panic!("Unsupported command"),
+                    Command::Ping(dest) => {
+                        self.send_ping(dest).await;
+                        false
+                    },
+                    Command::RoutingTable => {
+                        self.command_replier.send(Response::RoutingTable(self.routing_table.clone())).await.expect("Failed to send the routing table");
+                        false
+                    },
                 }
             },
             Err(_) => false,

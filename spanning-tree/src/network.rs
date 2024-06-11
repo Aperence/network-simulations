@@ -1,10 +1,12 @@
 pub mod switch;
 pub mod router;
 pub mod communicators;
+pub mod logger;
 pub mod messages;
+use logger::{Logger, Source};
 use switch::PortState;
 use tokio::sync::mpsc::channel;
-use std::{collections::{BTreeMap, HashMap}, vec};
+use std::{collections::{BTreeMap, HashMap}, net::Ipv4Addr, vec};
 
 use self::switch::Switch;
 use self::router::Router;
@@ -15,20 +17,25 @@ pub struct Network{
     switches: HashMap<String, SwitchCommunicator>,
     routers: HashMap<String, RouterCommunicator>,
     links: Vec<(String, u32, String, u32, u32)>,
+    logger: Logger
 }
 
 impl Network{
     pub fn new() -> Network{
-        Network{switches: HashMap::new(), routers: HashMap::new(), links: vec![]}
+        Network{switches: HashMap::new(), routers: HashMap::new(), links: vec![], logger: Logger::start()}
+    }
+
+    pub fn new_with_filters(filters: Vec<Source>) -> Network{
+        Network{switches: HashMap::new(), routers: HashMap::new(), links: vec![], logger: Logger::start_with_filters(filters)}
     }
 
     pub fn add_switch(&mut self, name: String, id: u32){
-        let communicator = Switch::start(name.clone(), id);
+        let communicator = Switch::start(name.clone(), id, self.logger.clone());
         self.switches.insert(name, communicator);
     }
 
     pub fn add_router(&mut self, name: String, id: u32){
-        let communicator = Router::start(name.clone(), id);
+        let communicator = Router::start(name.clone(), id, self.logger.clone());
         self.routers.insert(name, communicator);
     }
 
@@ -52,6 +59,18 @@ impl Network{
         };
 
         self.links.push((device1, port1, device2, port2, cost));
+    }
+
+    pub async fn ping(&self, from: String, to: Ipv4Addr){
+        let src = self.routers.get(&from).expect("Unknown router");
+
+        src.ping(to).await;
+    }
+
+    pub async fn get_routing_table(&self, router: String) -> HashMap<Ipv4Addr, (u32, u32)>{
+        let src = self.routers.get(&router).expect("Unknown router");
+
+        src.get_routing_table().await.expect("Failed to retrieve routing table")
     }
 
     pub async fn quit(self){
