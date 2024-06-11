@@ -1,4 +1,4 @@
-from bgp import BGPNetwork
+from src import BGPNetwork
 
 if __name__ == "__main__":
     network = BGPNetwork(verbose=True)

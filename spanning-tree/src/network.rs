@@ -71,3 +71,49 @@ impl Network{
         println!("}}");
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+    use PortState::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn test_spanning_tree() {
+        let mut network = Network::new();
+        network.add_switch("s1".into(), 1);
+        network.add_switch("s2".into(), 2);
+        network.add_switch("s3".into(), 3);
+        network.add_switch("s4".into(), 4);
+        network.add_switch("s6".into(), 6);
+        network.add_switch("s9".into(), 9);
+    
+        network.add_link("s1".into(), 1, "s2".into(), 1, 1).await;
+        network.add_link("s1".into(), 2, "s4".into(), 1, 1).await;
+        network.add_link("s2".into(), 2, "s9".into(), 1, 1).await;
+        network.add_link("s4".into(), 2, "s9".into(), 2, 1).await;
+        network.add_link("s4".into(), 3, "s3".into(), 1, 1).await;
+        network.add_link("s9".into(), 3, "s3".into(), 2, 1).await;
+        network.add_link("s9".into(), 4, "s6".into(), 1, 1).await;
+        network.add_link("s3".into(), 3, "s6".into(), 2, 1).await;
+    
+        // wait for convergence
+        thread::sleep(Duration::from_millis(250));
+
+        let switch_states = network.get_port_states().await;
+    
+        let mut expected: BTreeMap<String, BTreeMap<u32, PortState>> = BTreeMap::new();
+        expected.insert("s1".into(), [(1, Designated), (2, Designated)].into_iter().collect());
+        expected.insert("s2".into(), [(1, Root), (2, Designated)].into_iter().collect());
+        expected.insert("s3".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
+        expected.insert("s4".into(), [(1, Root), (2, Designated), (3, Designated)].into_iter().collect());
+        expected.insert("s6".into(), [(1, Blocked), (2, Root)].into_iter().collect());
+        expected.insert("s9".into(), [(1, Root), (2, Blocked), (3, Blocked), (4, Designated)].into_iter().collect());
+
+        assert_eq!(expected, switch_states);
+    
+        network.quit().await;
+    }
+}

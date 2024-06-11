@@ -1,7 +1,7 @@
-from bgp import BGPNetwork
+from src import BGPNetwork
 
 if __name__ == "__main__":
-    network = BGPNetwork(verbose=True)
+    network = BGPNetwork()
 
     # AS1
     network.add_router("r1", 1, 1)
@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
     # AS5
     network.add_router("r51", 5, 51)
-    
+
     network.add_provider_customer(provider="r21", customer="r51")
     network.add_provider_customer(provider="r21", customer="r41")
     network.add_provider_customer(provider="r41", customer="r5", med=3)
@@ -46,4 +46,4 @@ if __name__ == "__main__":
     network.announce_prefix("r21")
 
     network.print_bgp_tables()
-    network.plot_network()
+    # network.plot_network()
