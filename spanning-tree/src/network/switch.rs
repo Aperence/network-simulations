@@ -2,15 +2,8 @@ use std::{cell::RefCell, collections::{BTreeMap, HashMap}, rc::Rc, sync::Arc, ti
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 use log::info;
 
-pub enum Command{
-    StatePorts,
-    AddLink(Receiver<BPDU>, Sender<BPDU>, u32, u32),
-    Quit
-}
-
-pub enum Response{
-    StatePorts(BTreeMap<u32, PortState>)
-}
+use super::messages::{Message, bpdu::BPDU};
+use super::communicators::{SwitchCommunicator, Command, Response};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PortState{
@@ -29,45 +22,7 @@ impl ToString for PortState{
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub struct BPDU{
-    root: u32,
-    distance: u32,
-    switch: u32,
-    port: u32
-}
-
-impl ToString for BPDU{
-    fn to_string(&self) -> String{
-        format!("<{},{},{},{}>", self.root, self.distance, self.switch, self.port)
-    }
-}
-
-#[derive(Debug)]
-pub struct SwitchCommunicator{
-    command_sender: Sender<Command>, 
-    response_receiver: Rc<RefCell<Receiver<Response>>>
-}
-
-impl SwitchCommunicator {
-    pub async fn add_link(&self, receiver: Receiver<BPDU>, sender: Sender<BPDU>, port: u32, cost: u32){
-        self.command_sender.send(Command::AddLink(receiver, sender, port, cost)).await.expect("Failed to send add link command");
-    }
-
-    pub async fn quit(self){
-        self.command_sender.send(Command::Quit).await.expect("Failed to send quit message");
-    }
-
-    pub async fn get_port_state(&self) -> Result<BTreeMap<u32, PortState>, ()>{
-        self.command_sender.send(Command::StatePorts).await.expect("Failed to send StatePorts message");
-        match self.response_receiver.borrow_mut().recv().await{
-            Some(Response::StatePorts(ports)) => Ok(ports),
-            None => Err(()),
-        }
-    }
-}
-
-type Neighbor = (u32, Arc<Mutex<Receiver<BPDU>>>, Sender<BPDU>, u32); // port, receiver, sender, cost
+type Neighbor = (u32, Arc<Mutex<Receiver<Message>>>, Sender<Message>, u32); // port, receiver, sender, cost
 
 #[derive(Debug)]
 pub struct Switch{
@@ -156,7 +111,7 @@ impl Switch{
         let mut received_messages = vec![];
         for (port, receiver, _, cost) in self.neighbors.iter(){
             let mut receiver = receiver.lock().await;
-            if let Ok(bpdu) = receiver.try_recv(){
+            if let Ok(Message::BPDU(bpdu)) = receiver.try_recv(){
                 received_messages.push((bpdu, *port, *cost));
             }
         }
@@ -207,7 +162,7 @@ impl Switch{
             }
             let bpdu = BPDU{root: self.bpdu.root, distance: self.bpdu.distance, switch: self.id, port: *port};
             info!("Switch {} sending BPDU {} on port {}", self.name, bpdu.to_string(), port);
-            sender.send(bpdu).await.unwrap();
+            sender.send(Message::BPDU(bpdu)).await.unwrap();
         }
     }
 

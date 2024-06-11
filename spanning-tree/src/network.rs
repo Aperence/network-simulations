@@ -1,19 +1,25 @@
 pub mod switch;
+pub mod router;
+pub mod communicators;
+pub mod messages;
 use switch::PortState;
 use tokio::sync::mpsc::channel;
 use std::{collections::{BTreeMap, HashMap}, vec};
 
-use self::switch::{Switch, SwitchCommunicator};
+use self::switch::Switch;
+use self::router::Router;
+use self::communicators::{SwitchCommunicator, RouterCommunicator};
 
 #[derive(Debug)]
 pub struct Network{
     switches: HashMap<String, SwitchCommunicator>,
+    routers: HashMap<String, RouterCommunicator>,
     links: Vec<(String, u32, String, u32, u32)>,
 }
 
 impl Network{
     pub fn new() -> Network{
-        Network{switches: HashMap::new(), links: vec![]}
+        Network{switches: HashMap::new(), routers: HashMap::new(), links: vec![]}
     }
 
     pub fn add_switch(&mut self, name: String, id: u32){
@@ -21,20 +27,39 @@ impl Network{
         self.switches.insert(name, communicator);
     }
 
-    pub async fn add_link(&mut self, switch1: String, port1: u32, switch2: String, port2: u32, cost: u32){
+    pub fn add_router(&mut self, name: String, id: u32){
+        let communicator = Router::start(name.clone(), id);
+        self.routers.insert(name, communicator);
+    }
+
+    pub async fn add_link(&mut self, device1: String, port1: u32, device2: String, port2: u32, cost: u32){
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
-        let s1 = self.switches.get(&switch1).unwrap_or_else(|| panic!("Missing switch {}", switch1));
-        let s2 = self.switches.get(&switch2).unwrap_or_else(|| panic!("Missing switch {}", switch2));
+        match self.switches.get(&device1){
+            Some(s) => s.add_link(rx1, tx2, port1, cost).await,
+            None => match self.routers.get(&device1){
+                Some(r) => r.add_link(rx1, tx2, port1, cost).await,
+                None => panic!("Missing device {}", device1)
+            }
+        };
+        
+        match self.switches.get(&device2){
+            Some(s) => s.add_link(rx2, tx1, port2, cost).await,
+            None => match self.routers.get(&device2){
+                Some(r) => r.add_link(rx2, tx1, port2, cost).await,
+                None => panic!("Missing device {}", device2)
+            }
+        };
 
-        s1.add_link(rx1, tx2, port1, cost).await;
-        s2.add_link(rx2, tx1, port2, cost).await;
-
-        self.links.push((switch1, port1, switch2, port2, cost));
+        self.links.push((device1, port1, device2, port2, cost));
     }
 
     pub async fn quit(self){
         for (_, communicator) in self.switches{
+            communicator.quit().await;
+        }
+
+        for (_, communicator) in self.routers{
             communicator.quit().await;
         }
     }
