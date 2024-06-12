@@ -1,20 +1,18 @@
 pub mod bpdu;
 pub mod ospf;
-
-use std::net::Ipv4Addr;
+pub mod ip;
+pub mod bgp;
 
 use bpdu::BPDU;
 use ospf::OSPFMessage;
+use ip::IP;
+use bgp::BGPMessage;
 
-#[derive(Debug, Clone)]
-pub enum DebugMessage{
-    Ping(Ipv4Addr, Ipv4Addr),
-    Pong(Ipv4Addr, Ipv4Addr)
-}
 
 #[derive(Debug, Clone)]
 pub enum Message{
     BPDU(BPDU),
     OSPF(OSPFMessage),
-    Debug(DebugMessage)
+    IP(IP),
+    BGP(BGPMessage)
 }

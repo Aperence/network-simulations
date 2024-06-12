@@ -35,9 +35,30 @@ impl Network{
         self.switches.insert(name, communicator);
     }
 
-    pub fn add_router(&mut self, name: String, id: u32){
-        let communicator = Router::start(name.clone(), id, self.logger.clone());
+    pub fn add_router(&mut self, name: String, id: u32, router_as: u32){
+        let communicator = Router::start(name.clone(), id, router_as, self.logger.clone());
         self.routers.insert(name, communicator);
+    }
+
+    pub async fn add_peer_link(&mut self, device1: String, port1: u32, device2: String, port2: u32, med: u32){
+        let (tx1, rx1) = channel(1024);
+        let (tx2, rx2) = channel(1024);
+
+        let r1 = self.routers.get(&device1).expect(format!("Unknown device {}", device1).as_str());
+        let r2 = self.routers.get(&device2).expect(format!("Unknown device {}", device1).as_str());
+        r1.add_peer_link(rx1, tx2, port1, med).await;
+        r2.add_peer_link(rx2, tx1, port2, med).await;
+    }
+
+    pub async fn add_provider_customer_link(&mut self, provider: String, port1: u32, customer: String, port2: u32, med: u32){
+        let (tx1, rx1) = channel(1024);
+        let (tx2, rx2) = channel(1024);
+
+        let provider = self.routers.get(&provider).expect(format!("Unknown device {}", provider).as_str());
+        let customer = self.routers.get(&customer).expect(format!("Unknown device {}", customer).as_str());
+
+        provider.add_customer_link(rx1, tx2, port1, med).await;
+        customer.add_provider_link(rx2, tx1, port2, med).await;
     }
 
     pub async fn add_link(&mut self, device1: String, port1: u32, device2: String, port2: u32, cost: u32){
@@ -66,6 +87,12 @@ impl Network{
         let src = self.routers.get(&from).expect("Unknown router");
 
         src.ping(to).await;
+    }
+
+    pub async fn announce_prefix(&self, router: String){
+        let router = self.routers.get(&router).expect("Unknown router");
+
+        router.announce_prefix().await;
     }
 
     pub async fn get_routing_table(&self, router: String) -> HashMap<Ipv4Addr, (u32, u32)>{
@@ -168,10 +195,10 @@ mod tests {
     async fn test_ospf() {
         for _ in 0..10{
             let mut network = Network::new_with_filters(vec![Source::Ping]);
-            network.add_router("r1".into(), 1);
-            network.add_router("r2".into(), 2);
-            network.add_router("r3".into(), 3);
-            network.add_router("r4".into(), 4);
+            network.add_router("r1".into(), 1, 1);
+            network.add_router("r2".into(), 2, 1);
+            network.add_router("r3".into(), 3, 1);
+            network.add_router("r4".into(), 4, 1);
         
             network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
             network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
@@ -217,8 +244,8 @@ mod tests {
     async fn test_mix_switches_routers() {
         for _ in 0..10{
             let mut network = Network::new_with_filters(vec![]);
-            network.add_router("r1".into(), 1);
-            network.add_router("r2".into(), 2);
+            network.add_router("r1".into(), 1, 1);
+            network.add_router("r2".into(), 2, 1);
             network.add_switch("s1".into(), 11);
             network.add_switch("s2".into(), 12);
             network.add_switch("s3".into(), 13);

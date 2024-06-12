@@ -8,7 +8,9 @@ pub enum Source{
     OSPF,
     SPT,
     Ping,
-    Debug
+    Debug,
+    IP,
+    BGP
 }
 
 #[derive(Debug)]

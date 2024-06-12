@@ -7,7 +7,11 @@ pub enum Command{
     StatePorts,
     RoutingTable,
     AddLink(Receiver<Message>, Sender<Message>, u32, u32),
+    AddPeerLink(Receiver<Message>, Sender<Message>, u32, u32),
+    AddProvider(Receiver<Message>, Sender<Message>, u32, u32),
+    AddCustomer(Receiver<Message>, Sender<Message>, u32, u32),
     Ping(Ipv4Addr),
+    AnnouncePrefix,
     Quit
 }
 
@@ -53,8 +57,24 @@ impl RouterCommunicator {
         self.command_sender.send(Command::AddLink(receiver, sender, port, cost)).await.expect("Failed to send add link command");
     }
 
+    pub async fn add_peer_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32) {
+        self.command_sender.send(Command::AddPeerLink(receiver, sender, port, med)).await.expect("Failed to send add link command");
+    }
+
+    pub async fn add_customer_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32) {
+        self.command_sender.send(Command::AddCustomer(receiver, sender, port, med)).await.expect("Failed to send add link command");
+    }
+
+    pub async fn add_provider_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32) {
+        self.command_sender.send(Command::AddProvider(receiver, sender, port, med)).await.expect("Failed to send add link command");
+    }
+
     pub async fn ping(&self, ip: Ipv4Addr){
         self.command_sender.send(Command::Ping(ip)).await.expect("Failed to send ping command");
+    }
+
+    pub async fn announce_prefix(&self){
+        self.command_sender.send(Command::AnnouncePrefix).await.expect("Failed to send announce prefix command");
     }
 
     pub async fn get_routing_table(&self) -> Result<HashMap<Ipv4Addr, (u32, u32)>, ()>{

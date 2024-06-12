@@ -21,7 +21,7 @@ impl PartialOrd for Node{
 pub struct OSPFState{
     pub topo: HashMap<Ipv4Addr, HashSet<(u32, Ipv4Addr)>>,
     pub direct_neighbors: HashSet<(u32, u32, Ipv4Addr)>,
-    pub routing_table: HashMap<Ipv4Addr, (u32, u32)>,
+    pub routing_table: HashMap<Ipv4Addr, (u32, u32)>,  // (port, distance)
     pub received_lsp: HashSet<(Ipv4Addr, u32)>,
     pub lsp_seq: u32,
     pub router_info: Arc<Mutex<RouterInfo>>,
