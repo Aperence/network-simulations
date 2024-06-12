@@ -1,5 +1,6 @@
-use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap}, fmt::Display, net::Ipv4Addr, sync::Arc};
+use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap, HashSet}, fmt::Display, net::Ipv4Addr, sync::Arc};
 
+use log::info;
 use tokio::sync::Mutex;
 
 use crate::network::{
@@ -10,13 +11,13 @@ use crate::network::{
 
 use super::ospf::OSPFState;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum RouteSource{
     IBGP,
     EBGP
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub struct BGPRoute{
     pub prefix: Ipv4Addr,
     pub nexthop: Ipv4Addr,
@@ -39,7 +40,7 @@ pub struct BGPState {
     pub router_info: Arc<Mutex<RouterInfo>>,
     pub igp_info: Arc<Mutex<OSPFState>>,
     pub logger: Logger,
-    pub routes: HashMap<Ipv4Addr, Vec<BGPRoute>>
+    pub routes: HashMap<Ipv4Addr, HashSet<BGPRoute>>
 }
 
 impl BGPState {
@@ -89,10 +90,12 @@ impl BGPState {
 
         let routes = match self.routes.entry(prefix) {
             Entry::Occupied(o) => o.into_mut(),
-            Entry::Vacant(v) => v.insert(vec![]),
+            Entry::Vacant(v) => v.insert(HashSet::new()),
         };
 
-        routes.push(route);
+        routes.insert(route);
+
+        info!("Router {} has routes {:?}", name, routes);
 
         let best = self.decision_process(prefix).await;
 
@@ -126,18 +129,21 @@ impl BGPState {
 
         let routes = routes.unwrap();
 
-        let mut new_routes = vec![];
+        let mut new_routes = HashSet::new();
         let mut best_removed = false;
         for route in routes{
-            if let Some(r) = &previous_best{
-                best_removed = best_removed || route.nexthop == r.nexthop && route.router_id == r.router_id;
-            }
-            if route.nexthop == nexthop && route.router_id == router_id{
-                new_routes.push(route.clone());
+            if route.nexthop == nexthop && route.router_id == router_id && route.as_path == as_path{
+                if let Some(r) = &previous_best{
+                    best_removed = best_removed || route.nexthop == r.nexthop && route.router_id == r.router_id && route.as_path == r.as_path ; 
+                }
+            }else{
+                new_routes.insert(route.clone());
             }
         }
         
         self.routes.insert(prefix, new_routes);
+
+        info!("Router {} has new routes after withdraw : {:?}", name, self.routes);
 
         if best_removed{
             let previous_best = previous_best.unwrap();

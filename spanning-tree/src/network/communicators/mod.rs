@@ -1,6 +1,6 @@
 use crate::network::PortState;
 use crate::network::messages::Message;
-use std::{cell::RefCell, collections::{BTreeMap, HashMap}, net::Ipv4Addr, rc::Rc};
+use std::{cell::RefCell, collections::{BTreeMap, HashMap, HashSet}, net::Ipv4Addr, rc::Rc};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::protocols::bgp::BGPRoute;
@@ -21,7 +21,7 @@ pub enum Command{
 pub enum Response{
     StatePorts(BTreeMap<u32, PortState>),
     RoutingTable(HashMap<Ipv4Addr, (u32, u32)>),
-    BGPRoutes(HashMap<Ipv4Addr, Vec<BGPRoute>>)
+    BGPRoutes(HashMap<Ipv4Addr, (Option<BGPRoute>, HashSet<BGPRoute>)>)
 }
 
 #[derive(Debug)]
@@ -92,7 +92,7 @@ impl RouterCommunicator {
         }
     }
 
-    pub async fn get_bgp_routes(&self) -> Result<HashMap<Ipv4Addr, Vec<BGPRoute>>, ()>{
+    pub async fn get_bgp_routes(&self) -> Result<HashMap<Ipv4Addr, (Option<BGPRoute>, HashSet<BGPRoute>)>, ()>{
         self.command_sender.send(Command::BGPRoutes).await.expect("Failed to send BGPRoutes message");
         match self.response_receiver.borrow_mut().recv().await{
             Some(Response::StatePorts(_)) => panic!("Unexpected answer"),

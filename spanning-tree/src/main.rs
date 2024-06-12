@@ -16,24 +16,32 @@ async fn main() -> Result<(), ()> {
     network.add_router("r2".into(), 2, 2);
     network.add_router("r3".into(), 3, 3);
     network.add_router("r4".into(), 4, 4);
-
-    network.add_provider_customer_link("r2".into(), 1, "r1".into(), 1, 0).await;
-    network.add_provider_customer_link("r2".into(), 2, "r4".into(), 1, 0).await;
-    network.add_provider_customer_link("r4".into(), 3, "r3".into(), 1, 0).await;
-
-    network.add_peer_link("r1".into(), 2, "r4".into(), 2, 0).await;
+    network.add_router("r5".into(), 5, 5);
+    network.add_router("r6".into(), 6, 6);
+    network.add_router("r7".into(), 7, 7);
+    network.add_router("r8".into(), 8, 8);
 
 
-    network.announce_prefix("r1".into()).await;
-    network.announce_prefix("r3".into()).await;
+    network.add_provider_customer_link("r3".into(), 1, "r1".into(), 1, 0).await;
+    network.add_provider_customer_link("r1".into(), 2, "r2".into(), 1, 0).await;
+    network.add_provider_customer_link("r4".into(), 1, "r3".into(), 3, 0).await;
+    network.add_provider_customer_link("r5".into(), 1, "r2".into(), 3, 0).await;
+    network.add_provider_customer_link("r7".into(), 1, "r4".into(), 3, 0).await;
+    network.add_provider_customer_link("r6".into(), 2, "r7".into(), 2, 0).await;
+    network.add_provider_customer_link("r8".into(), 1, "r7".into(), 3, 0).await;
+
+    network.add_peer_link("r2".into(), 2, "r3".into(), 2, 0).await;
+    network.add_peer_link("r4".into(), 2, "r5".into(), 2, 0).await;
+    network.add_peer_link("r5".into(), 3, "r6".into(), 1, 0).await;
+    network.add_peer_link("r6".into(), 3, "r8".into(), 2, 0).await;
+
+
+    network.announce_prefix("r2".into()).await;
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(2000));
 
     network.print_bgp_tables().await;
-    network.ping("r1".into(), "10.0.3.3".parse().unwrap()).await;
-
-    thread::sleep(Duration::from_millis(500));
 
     network.quit().await;
 

@@ -206,7 +206,14 @@ impl Router{
                         false
                     },
                     Command::BGPRoutes => {
-                        self.command_replier.send(Response::BGPRoutes(self.bgp_state.lock().await.routes.clone())).await.expect("Failed to send the routing table");
+                        let bgp_state = self.bgp_state.lock().await;
+                        let mut routes = HashMap::new();
+                        
+                        for (prefix, r) in bgp_state.routes.iter(){
+                            let best_route = bgp_state.decision_process(*prefix).await;
+                            routes.insert(*prefix, (best_route, r.clone()));
+                        }
+                        self.command_replier.send(Response::BGPRoutes(routes)).await.expect("Failed to send the routing table");
                         false
                     },
                 }
