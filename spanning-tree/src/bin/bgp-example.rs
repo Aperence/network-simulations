@@ -1,11 +1,9 @@
 
-pub mod network;
-
 use std::{thread, time::Duration};
 
-use network::logger::Source;
+use network_simulator::network::logger::Source;
 
-use self::network::Network;
+use network_simulator::network::Network;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {

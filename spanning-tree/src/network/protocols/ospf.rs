@@ -101,6 +101,9 @@ impl OSPFState{
         }
         let map = self.get_neighbors().await;
         let (_, cost) = map.get(&port).unwrap();
+        if self.direct_neighbors.contains(&(*cost, port, ip)){
+            return;
+        }
         self.direct_neighbors.insert((*cost, port, ip));
         self.logger.log(Source::OSPF, format!("Router {} has neighbors : {:?}", self.get_name().await, self.direct_neighbors)).await;
         self.routing_table.insert(ip, (port, *cost));

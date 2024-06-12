@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap}, net::Ipv4Addr, sync::Arc};
+use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap}, fmt::Display, net::Ipv4Addr, sync::Arc};
 
 use tokio::sync::Mutex;
 
@@ -18,13 +18,20 @@ pub enum RouteSource{
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct BGPRoute{
-    prefix: Ipv4Addr,
-    nexthop: Ipv4Addr,
-    as_path: Vec<u32>,
-    pref: u32,
-    med: u32,
-    router_id: u32,
-    source: RouteSource
+    pub prefix: Ipv4Addr,
+    pub nexthop: Ipv4Addr,
+    pub as_path: Vec<u32>,
+    pub pref: u32,
+    pub med: u32,
+    pub router_id: u32,
+    pub source: RouteSource
+}
+
+impl Display for BGPRoute{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = self.as_path.iter().map(|v| format!("AS{}", v)).collect::<Vec<String>>().join(":");
+        write!(f, "nexthop={}, AS path={}, pref={}, med={}", self.nexthop, path, self.pref, self.med)
+    }
 }
 
 #[derive(Debug)]
@@ -32,7 +39,7 @@ pub struct BGPState {
     pub router_info: Arc<Mutex<RouterInfo>>,
     pub igp_info: Arc<Mutex<OSPFState>>,
     pub logger: Logger,
-    routes: HashMap<Ipv4Addr, Vec<BGPRoute>>
+    pub routes: HashMap<Ipv4Addr, Vec<BGPRoute>>
 }
 
 impl BGPState {
@@ -50,8 +57,8 @@ impl BGPState {
             BGPMessage::Update(prefix, nexthop, as_path, med, router_id) => {
                 self.process_update(port, prefix, nexthop, as_path, med, router_id).await
             }
-            BGPMessage::Withdraw(prefix, nexthop, as_path) => {
-                self.process_withdraw(port, prefix, nexthop, as_path).await
+            BGPMessage::Withdraw(prefix, nexthop, as_path, router_id) => {
+                self.process_withdraw(port, prefix, nexthop, as_path, router_id).await
             }
         }
     }
@@ -68,6 +75,7 @@ impl BGPState {
         
         let info = self.router_info.lock().await;
         let name = info.name.clone();
+        let ip = info.ip;
         let pref = info.bgp_links.get(&port).unwrap().2;
         let current_as = info.router_as;
         drop(info);
@@ -90,19 +98,57 @@ impl BGPState {
 
         if previous_best != best{
             if let Some(previous_best_route) = previous_best{
-                self.send_withdraw(previous_best_route.prefix, previous_best_route.nexthop, previous_best_route.as_path).await;
+                self.send_withdraw(previous_best_route.prefix, ip, previous_best_route.as_path).await;
             }
             let best = best.unwrap();
-            self.send_update(best.prefix, best.nexthop, best.as_path).await;
+            self.send_update(best.prefix, ip, best.as_path, best.pref).await;
         }
     }
 
-    pub async fn process_withdraw(&self, port: u32, prefix: Ipv4Addr, nexthop: Ipv4Addr, as_path: Vec<u32>) {
+    pub async fn process_withdraw(&mut self, port: u32, prefix: Ipv4Addr, nexthop: Ipv4Addr, as_path: Vec<u32>, router_id: u32) {
         let info = self.router_info.lock().await;
         let name = info.name.clone();
+        let current_as = info.router_as;
+        let ip = info.ip;
         drop(info);
+        if as_path.contains(&current_as){
+            return;
+        }
         self.logger.borrow().log(Source::BGP, format!("Router {} received bgp withdraw on port {} for prefix {} with nexthop = {}, AS path = {:?}", name, port, prefix, nexthop, as_path)).await;
     
+        let previous_best = self.decision_process(prefix).await;
+
+        let routes = self.routes.get(&prefix);
+
+        if let None = routes{
+            return;
+        }
+
+        let routes = routes.unwrap();
+
+        let mut new_routes = vec![];
+        let mut best_removed = false;
+        for route in routes{
+            if let Some(r) = &previous_best{
+                best_removed = best_removed || route.nexthop == r.nexthop && route.router_id == r.router_id;
+            }
+            if route.nexthop == nexthop && route.router_id == router_id{
+                new_routes.push(route.clone());
+            }
+        }
+        
+        self.routes.insert(prefix, new_routes);
+
+        if best_removed{
+            let previous_best = previous_best.unwrap();
+            self.send_withdraw(prefix, ip, previous_best.as_path).await;
+
+            let new_best = self.decision_process(prefix).await;
+            if let Some(new_best_route) = new_best{
+                self.send_update(prefix, ip, new_best_route.as_path, new_best_route.pref).await;
+            }
+        }
+        
     }
 
     pub async fn distance_nexthop(&self, nexthop: Ipv4Addr){
@@ -122,6 +168,10 @@ impl BGPState {
 
         let routes = routes.unwrap();
 
+        if routes.is_empty(){
+            return None;
+        }
+
         let mut best_pref = 0;
         let mut best_path_len = usize::max_value();
         for route in routes{
@@ -140,7 +190,6 @@ impl BGPState {
             if route.pref != best_pref || route.as_path.len() != best_path_len{
                 continue;
             }
-            println!("In");
             let map_entry = match map.entry(route.as_path[0]) {
                 Entry::Occupied(o) => o.into_mut(),
                 Entry::Vacant(v) => v.insert(vec![]),
@@ -185,10 +234,14 @@ impl BGPState {
         Some(best_route.clone())
     }
 
-    pub async fn send_update(&self, prefix: Ipv4Addr, nexthop: Ipv4Addr, mut as_path: Vec<u32>) {
+    pub async fn send_update(&self, prefix: Ipv4Addr, nexthop: Ipv4Addr, mut as_path: Vec<u32>, pref_from: u32) {
         let info = self.router_info.lock().await;
         as_path.insert(0, info.router_as);
-        for (_, (_, sender, _, med)) in info.bgp_links.iter() {
+        for (_, (_, sender, pref, med)) in info.bgp_links.iter() {
+            if pref_from != 150 && *pref != 150{
+                // send routes from peer/providers only to customers
+                continue;
+            }
             let message = BGPMessage::Update(prefix, nexthop, as_path.clone(), *med, info.id);
             sender
                 .send(Message::BGP(message))
@@ -201,7 +254,7 @@ impl BGPState {
         let info = self.router_info.lock().await;
         as_path.insert(0, info.router_as);
         for (_, (_, sender, _, _)) in info.bgp_links.iter() {
-            let message = BGPMessage::Withdraw(prefix, nexthop, as_path.clone());
+            let message = BGPMessage::Withdraw(prefix, nexthop, as_path.clone(), info.id);
             sender
                 .send(Message::BGP(message))
                 .await
@@ -214,6 +267,16 @@ impl BGPState {
         self.logger.borrow().log(Source::BGP, format!("Router {} announcing its prefix {}", info.name, info.ip)).await;
         let ip = info.ip;
         drop(info);
-        self.send_update(ip, ip, vec![]).await;
+        self.send_update(ip, ip, vec![], 150).await;
+    }
+
+    pub async fn get_nexthop(&self, prefix: Ipv4Addr) -> Option<Ipv4Addr>{
+        let best_route = self.decision_process(prefix).await;
+
+        if let Some(r) = best_route {
+            Some(r.nexthop)
+        }else{
+            None
+        }
     }
 }

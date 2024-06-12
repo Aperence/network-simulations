@@ -33,7 +33,7 @@ impl Router{
     pub fn start(name: String, id: u32, router_as: u32, logger: Logger) -> RouterCommunicator{
         let (tx_command, rx_command) = channel(1024);
         let (tx_response, rx_response) = channel(1024);
-        let ip = Ipv4Addr::new(10, 0, 0, id as u8);
+        let ip = Ipv4Addr::new(10, 0, router_as as u8, id as u8);
         let router_info = Arc::new(Mutex::new(RouterInfo{
             name, 
             ip,
@@ -134,7 +134,14 @@ impl Router{
 
     pub async fn send_message(&self, dest: Ipv4Addr, message: Message){
         let info_router = self.router_info.lock().await;
-        if let Some((port, _)) = self.igp_state.lock().await.get_port(dest){
+        let igp_state = self.igp_state.lock().await;
+        let bgp_state = self.bgp_state.lock().await;
+        if let Some(nexthop) = bgp_state.get_nexthop(dest).await{
+            if let Some((port, _)) = igp_state.get_port(nexthop){
+                let (_, sender, _, _) = info_router.bgp_links.get(port).unwrap();
+                sender.send(message).await.unwrap();
+            }
+        }else if let Some((port, _)) = igp_state.get_port(dest){
             let (_, sender, _) = info_router.neighbors.get(port).unwrap();
             sender.send(message).await.unwrap();
         }
@@ -170,29 +177,36 @@ impl Router{
                         self.command_replier.send(Response::RoutingTable(self.igp_state.lock().await.routing_table.clone())).await.expect("Failed to send the routing table");
                         false
                     },
-                    Command::AddPeerLink(receiver, sender, port, med) => {
+                    Command::AddPeerLink(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::Debug, format!("Router {} received adding peer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 100, med));
+                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
                         false
                     },
-                    Command::AddProvider(receiver, sender, port, med) => {
+                    Command::AddProvider(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::Debug, format!("Router {} received adding provider link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 50, med));
+                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
                         false
                     },
-                    Command::AddCustomer(receiver, sender, port, med) => {
+                    Command::AddCustomer(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::Debug, format!("Router {} received adding customer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 150, med));
+                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
                         false
                     },
                     Command::AnnouncePrefix => {
                         self.bgp_state.lock().await.announce_prefix().await;
+                        false
+                    },
+                    Command::BGPRoutes => {
+                        self.command_replier.send(Response::BGPRoutes(self.bgp_state.lock().await.routes.clone())).await.expect("Failed to send the routing table");
                         false
                     },
                 }
