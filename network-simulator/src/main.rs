@@ -12,28 +12,28 @@ async fn main() -> Result<(), ()> {
     env_logger::init(); // you can run using `RUST_LOG=debug cargo run` to get more details on what messages the switches are exchanging
 
     let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
-    network.add_router("r1".into(), 1, 1);
-    network.add_router("r2".into(), 2, 1);
-    network.add_router("r3".into(), 3, 1);
-    network.add_router("r4".into(), 4, 2);
-    network.add_router("r5".into(), 5, 3);
+    network.add_router("r1", 1, 1);
+    network.add_router("r2", 2, 1);
+    network.add_router("r3", 3, 1);
+    network.add_router("r4", 4, 2);
+    network.add_router("r5", 5, 3);
 
     network
-        .add_provider_customer_link("r4".into(), 1, "r1".into(), 1, 0)
-        .await;
-
-    network
-        .add_provider_customer_link("r3".into(), 1, "r5".into(), 3, 0)
+        .add_provider_customer_link("r4", 1, "r1", 1, 0)
         .await;
 
     network
-        .add_link("r1".into(), 2, "r2".into(), 1, 0)
+        .add_provider_customer_link("r3", 1, "r5", 3, 0)
+        .await;
+
+    network
+        .add_link("r1", 2, "r2", 1, 0)
         .await;
     network
-        .add_link("r2".into(), 2, "r3".into(), 1, 0)
+        .add_link("r2", 2, "r3", 1, 0)
         .await;
     network
-        .add_link("r1".into(), 3, "r3".into(), 2, 0)
+        .add_link("r1", 3, "r3", 2, 0)
         .await;
 
     let routers = ["r1", "r2", "r3"];
@@ -48,13 +48,13 @@ async fn main() -> Result<(), ()> {
 
     network.print_routing_tables().await;
 
-    network.announce_prefix("r4".into()).await;
-    network.announce_prefix("r5".into()).await;
+    network.announce_prefix("r4").await;
+    network.announce_prefix("r5").await;
 
     thread::sleep(Duration::from_millis(250));
 
     network.print_routing_tables().await;
-    network.ping("r4".into(), "10.0.3.5".parse().unwrap()).await;
+    network.ping("r4", "10.0.3.5".parse().unwrap()).await;
 
     thread::sleep(Duration::from_millis(250));
 

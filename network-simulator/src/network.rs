@@ -45,15 +45,15 @@ impl Network {
         }
     }
 
-    pub fn add_switch(&mut self, name: String, id: u32) {
-        let communicator = Switch::start(name.clone(), id, self.logger.clone());
-        self.switches.insert(name, communicator);
+    pub fn add_switch(&mut self, name: &str, id: u32) {
+        let communicator = Switch::start(name.to_string(), id, self.logger.clone());
+        self.switches.insert(name.to_string(), communicator);
     }
 
-    pub fn add_router(&mut self, name: String, id: u32, router_as: u32) {
-        let communicator = Router::start(name.clone(), id, router_as, self.logger.clone());
+    pub fn add_router(&mut self, name: &str, id: u32, router_as: u32) {
+        let communicator = Router::start(name.to_string(), id, router_as, self.logger.clone());
         self.routers.insert(
-            name,
+            name.to_string(),
             (
                 communicator,
                 Ipv4Addr::new(10, 0, router_as as u8, id as u8),
@@ -67,9 +67,9 @@ impl Network {
 
     pub async fn add_peer_link(
         &mut self,
-        device1: String,
+        device1: &str,
         port1: u32,
-        device2: String,
+        device2: &str,
         port2: u32,
         med: u32,
     ) {
@@ -78,11 +78,11 @@ impl Network {
 
         let (r1, ip1) = self
             .routers
-            .get(&device1)
+            .get(&device1.to_string())
             .expect(format!("Unknown device {}", device1).as_str());
         let (r2, ip2) = self
             .routers
-            .get(&device2)
+            .get(&device2.to_string())
             .expect(format!("Unknown device {}", device1).as_str());
         r1.add_peer_link(rx1, tx2, port1, med, *ip2).await;
         r2.add_peer_link(rx2, tx1, port2, med, *ip1).await;
@@ -90,9 +90,9 @@ impl Network {
 
     pub async fn add_provider_customer_link(
         &mut self,
-        provider: String,
+        provider: &str,
         port1: u32,
-        customer: String,
+        customer: &str,
         port2: u32,
         med: u32,
     ) {
@@ -101,11 +101,11 @@ impl Network {
 
         let (provider, ip_provider) = self
             .routers
-            .get(&provider)
+            .get(&provider.to_string())
             .expect(format!("Unknown device {}", provider).as_str());
         let (customer, ip_customer) = self
             .routers
-            .get(&customer)
+            .get(&customer.to_string())
             .expect(format!("Unknown device {}", customer).as_str());
 
         provider
@@ -118,65 +118,65 @@ impl Network {
 
     pub async fn add_link(
         &mut self,
-        device1: String,
+        device1: &str,
         port1: u32,
-        device2: String,
+        device2: &str,
         port2: u32,
         cost: u32,
     ) {
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
-        match self.switches.get(&device1) {
+        match self.switches.get(&device1.to_string()) {
             Some(s) => s.add_link(rx1, tx2, port1, cost).await,
-            None => match self.routers.get(&device1) {
+            None => match self.routers.get(&device1.to_string()) {
                 Some((r, _)) => r.add_link(rx1, tx2, port1, cost).await,
                 None => panic!("Missing device {}", device1),
             },
         };
 
-        match self.switches.get(&device2) {
+        match self.switches.get(&device2.to_string()) {
             Some(s) => s.add_link(rx2, tx1, port2, cost).await,
-            None => match self.routers.get(&device2) {
+            None => match self.routers.get(&device2.to_string()) {
                 Some((r, _)) => r.add_link(rx2, tx1, port2, cost).await,
                 None => panic!("Missing device {}", device2),
             },
         };
 
-        self.links.push((device1, port1, device2, port2, cost));
+        self.links.push((device1.to_string(), port1, device2.to_string(), port2, cost));
     }
 
     pub async fn add_ibgp_connection(
         &mut self,
-        device1: String,
-        device2: String,
+        device1: &str,
+        device2: &str,
     ) {
         let (d1, ip1) = self
             .routers
-            .get(&device1)
+            .get(&device1.to_string())
             .expect(format!("Unknown device {}", device1).as_str());
         let (d2, ip2) = self
             .routers
-            .get(&device2)
+            .get(&device2.to_string())
             .expect(format!("Unknown device {}", device2).as_str());
 
         d1.add_ibgp_connection(*ip2).await;
         d2.add_ibgp_connection(*ip1).await;
     }
 
-    pub async fn ping(&self, from: String, to: Ipv4Addr) {
-        let src = &self.routers.get(&from).expect("Unknown router").0;
+    pub async fn ping(&self, from: &str, to: Ipv4Addr) {
+        let src = &self.routers.get(&from.to_string()).expect("Unknown router").0;
 
         src.ping(to).await;
     }
 
-    pub async fn announce_prefix(&self, router: String) {
-        let router = &self.routers.get(&router).expect("Unknown router").0;
+    pub async fn announce_prefix(&self, router: &str) {
+        let router = &self.routers.get(&router.to_string()).expect("Unknown router").0;
 
         router.announce_prefix().await;
     }
 
-    pub async fn get_routing_table(&self, router: String) -> HashMap<Ipv4Addr, (u32, u32)> {
-        let src = &self.routers.get(&router).expect("Unknown router").0;
+    pub async fn get_routing_table(&self, router: &str) -> HashMap<Ipv4Addr, (u32, u32)> {
+        let src = &self.routers.get(&router.to_string()).expect("Unknown router").0;
 
         src.get_routing_table()
             .await
@@ -185,9 +185,9 @@ impl Network {
 
     pub async fn get_bgp_routes(
         &self,
-        router: String,
+        router: &str,
     ) -> HashMap<Ipv4Addr, (Option<BGPRoute>, HashSet<BGPRoute>)> {
-        let src = &self.routers.get(&router).expect("Unknown router").0;
+        let src = &self.routers.get(&router.to_string()).expect("Unknown router").0;
 
         src.get_bgp_routes()
             .await
@@ -226,8 +226,8 @@ impl Network {
         }
     }
 
-    pub async fn print_routing_table(&self, router: String) {
-        let routing_tbale = self.get_routing_table(router.clone()).await;
+    pub async fn print_routing_table(&self, router: &str) {
+        let routing_tbale = self.get_routing_table(router).await;
 
         println!("{}", router);
 
@@ -238,12 +238,12 @@ impl Network {
 
     pub async fn print_routing_tables(&self) {
         for router in self.routers.keys() {
-            self.print_routing_table(router.clone()).await;
+            self.print_routing_table(router).await;
         }
     }
 
-    pub async fn print_bgp_table(&self, router: String) {
-        let bgp_table = self.get_bgp_routes(router.clone()).await;
+    pub async fn print_bgp_table(&self, router: &str) {
+        let bgp_table = self.get_bgp_routes(router).await;
 
         println!("{}", router);
 
@@ -261,7 +261,7 @@ impl Network {
 
     pub async fn print_bgp_tables(&self) {
         for router in self.routers.keys() {
-            self.print_bgp_table(router.clone()).await;
+            self.print_bgp_table(router).await;
         }
     }
 
@@ -301,21 +301,21 @@ mod tests {
     async fn test_spanning_tree() {
         for _ in 0..10 {
             let mut network = Network::new();
-            network.add_switch("s1".into(), 1);
-            network.add_switch("s2".into(), 2);
-            network.add_switch("s3".into(), 3);
-            network.add_switch("s4".into(), 4);
-            network.add_switch("s6".into(), 6);
-            network.add_switch("s9".into(), 9);
+            network.add_switch("s1", 1);
+            network.add_switch("s2", 2);
+            network.add_switch("s3", 3);
+            network.add_switch("s4", 4);
+            network.add_switch("s6", 6);
+            network.add_switch("s9", 9);
 
-            network.add_link("s1".into(), 1, "s2".into(), 1, 1).await;
-            network.add_link("s1".into(), 2, "s4".into(), 1, 1).await;
-            network.add_link("s2".into(), 2, "s9".into(), 1, 1).await;
-            network.add_link("s4".into(), 2, "s9".into(), 2, 1).await;
-            network.add_link("s4".into(), 3, "s3".into(), 1, 1).await;
-            network.add_link("s9".into(), 3, "s3".into(), 2, 1).await;
-            network.add_link("s9".into(), 4, "s6".into(), 1, 1).await;
-            network.add_link("s3".into(), 3, "s6".into(), 2, 1).await;
+            network.add_link("s1", 1, "s2", 1, 1).await;
+            network.add_link("s1", 2, "s4", 1, 1).await;
+            network.add_link("s2", 2, "s9", 1, 1).await;
+            network.add_link("s4", 2, "s9", 2, 1).await;
+            network.add_link("s4", 3, "s3", 1, 1).await;
+            network.add_link("s9", 3, "s3", 2, 1).await;
+            network.add_link("s9", 4, "s6", 1, 1).await;
+            network.add_link("s3", 3, "s6", 2, 1).await;
 
             // wait for convergence
             thread::sleep(Duration::from_millis(250));
@@ -361,21 +361,21 @@ mod tests {
     async fn test_ospf() {
         for _ in 0..10 {
             let mut network = Network::new_with_filters(vec![Source::Ping]);
-            network.add_router("r1".into(), 1, 1);
-            network.add_router("r2".into(), 2, 1);
-            network.add_router("r3".into(), 3, 1);
-            network.add_router("r4".into(), 4, 1);
+            network.add_router("r1", 1, 1);
+            network.add_router("r2", 2, 1);
+            network.add_router("r3", 3, 1);
+            network.add_router("r4", 4, 1);
 
-            network.add_link("r1".into(), 1, "r2".into(), 1, 1).await;
-            network.add_link("r1".into(), 2, "r3".into(), 1, 1).await;
-            network.add_link("r3".into(), 3, "r4".into(), 1, 1).await;
-            network.add_link("r2".into(), 2, "r3".into(), 2, 1).await;
+            network.add_link("r1", 1, "r2", 1, 1).await;
+            network.add_link("r1", 2, "r3", 1, 1).await;
+            network.add_link("r3", 3, "r4", 1, 1).await;
+            network.add_link("r2", 2, "r3", 2, 1).await;
 
             // wait for convergence
             thread::sleep(Duration::from_millis(250));
 
             assert_eq!(
-                network.get_routing_table("r1".into()).await,
+                network.get_routing_table("r1").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (0, 0)),
                     (Ipv4Addr::new(10, 0, 1, 2), (1, 1)),
@@ -387,7 +387,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_routing_table("r2".into()).await,
+                network.get_routing_table("r2").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
                     (Ipv4Addr::new(10, 0, 1, 2), (0, 0)),
@@ -399,7 +399,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_routing_table("r3".into()).await,
+                network.get_routing_table("r3").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
                     (Ipv4Addr::new(10, 0, 1, 2), (2, 1)),
@@ -411,7 +411,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_routing_table("r4".into()).await,
+                network.get_routing_table("r4").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (1, 2)),
                     (Ipv4Addr::new(10, 0, 1, 2), (1, 2)),
@@ -430,25 +430,25 @@ mod tests {
     async fn test_mix_switches_routers() {
         for _ in 0..10 {
             let mut network = Network::new_with_filters(vec![]);
-            network.add_router("r1".into(), 1, 1);
-            network.add_router("r2".into(), 2, 1);
-            network.add_switch("s1".into(), 11);
-            network.add_switch("s2".into(), 12);
-            network.add_switch("s3".into(), 13);
-            network.add_switch("s4".into(), 14);
+            network.add_router("r1", 1, 1);
+            network.add_router("r2", 2, 1);
+            network.add_switch("s1", 11);
+            network.add_switch("s2", 12);
+            network.add_switch("s3", 13);
+            network.add_switch("s4", 14);
 
-            network.add_link("r1".into(), 1, "s1".into(), 1, 1).await;
-            network.add_link("s1".into(), 2, "s2".into(), 1, 1).await;
-            network.add_link("s2".into(), 2, "s3".into(), 1, 1).await;
-            network.add_link("s4".into(), 1, "s3".into(), 3, 1).await;
-            network.add_link("s4".into(), 2, "s1".into(), 3, 1).await;
-            network.add_link("s3".into(), 2, "r2".into(), 1, 1).await;
+            network.add_link("r1", 1, "s1", 1, 1).await;
+            network.add_link("s1", 2, "s2", 1, 1).await;
+            network.add_link("s2", 2, "s3", 1, 1).await;
+            network.add_link("s4", 1, "s3", 3, 1).await;
+            network.add_link("s4", 2, "s1", 3, 1).await;
+            network.add_link("s3", 2, "r2", 1, 1).await;
 
             // wait for convergence
             thread::sleep(Duration::from_millis(250));
 
             assert_eq!(
-                network.get_routing_table("r1".into()).await,
+                network.get_routing_table("r1").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (0, 0)),
                     (Ipv4Addr::new(10, 0, 1, 2), (1, 1))
@@ -458,7 +458,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_routing_table("r2".into()).await,
+                network.get_routing_table("r2").await,
                 [
                     (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
                     (Ipv4Addr::new(10, 0, 1, 2), (0, 0))
@@ -478,32 +478,32 @@ mod tests {
     async fn test_bgp() {
         for _ in 0..5 {
             let mut network = Network::new_with_filters(vec![Source::BGP]);
-            network.add_router("r1".into(), 1, 1);
-            network.add_router("r2".into(), 2, 2);
-            network.add_router("r3".into(), 3, 3);
-            network.add_router("r4".into(), 4, 4);
+            network.add_router("r1", 1, 1);
+            network.add_router("r2", 2, 2);
+            network.add_router("r3", 3, 3);
+            network.add_router("r4", 4, 4);
 
             network
-                .add_provider_customer_link("r2".into(), 1, "r1".into(), 1, 0)
+                .add_provider_customer_link("r2", 1, "r1", 1, 0)
                 .await;
             network
-                .add_provider_customer_link("r2".into(), 2, "r4".into(), 1, 0)
+                .add_provider_customer_link("r2", 2, "r4", 1, 0)
                 .await;
             network
-                .add_provider_customer_link("r4".into(), 3, "r3".into(), 1, 0)
+                .add_provider_customer_link("r4", 3, "r3", 1, 0)
                 .await;
 
             network
-                .add_peer_link("r1".into(), 2, "r4".into(), 2, 0)
+                .add_peer_link("r1", 2, "r4", 2, 0)
                 .await;
 
-            network.announce_prefix("r1".into()).await;
+            network.announce_prefix("r1").await;
 
             // wait for convergence
             thread::sleep(Duration::from_millis(1000));
 
             assert_eq!(
-                network.get_bgp_routes("r2".into()).await,
+                network.get_bgp_routes("r2").await,
                 [(
                     "10.0.1.1".parse().unwrap(),
                     (
@@ -534,7 +534,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_bgp_routes("r3".into()).await,
+                network.get_bgp_routes("r3").await,
                 [(
                     "10.0.1.1".parse().unwrap(),
                     (
@@ -565,7 +565,7 @@ mod tests {
             );
 
             assert_eq!(
-                network.get_bgp_routes("r4".into()).await,
+                network.get_bgp_routes("r4").await,
                 [(
                     "10.0.1.1".parse().unwrap(),
                     (
@@ -613,51 +613,51 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     pub async fn test_bgp_complex() {
         let mut network = Network::new_with_filters(vec![Source::Ping, Source::BGP]);
-        network.add_router("r1".into(), 1, 1);
-        network.add_router("r2".into(), 2, 2);
-        network.add_router("r3".into(), 3, 3);
-        network.add_router("r4".into(), 4, 4);
-        network.add_router("r5".into(), 5, 5);
-        network.add_router("r6".into(), 6, 6);
-        network.add_router("r7".into(), 7, 7);
-        network.add_router("r8".into(), 8, 8);
+        network.add_router("r1", 1, 1);
+        network.add_router("r2", 2, 2);
+        network.add_router("r3", 3, 3);
+        network.add_router("r4", 4, 4);
+        network.add_router("r5", 5, 5);
+        network.add_router("r6", 6, 6);
+        network.add_router("r7", 7, 7);
+        network.add_router("r8", 8, 8);
 
         network
-            .add_provider_customer_link("r3".into(), 1, "r1".into(), 1, 0)
+            .add_provider_customer_link("r3", 1, "r1", 1, 0)
             .await;
         network
-            .add_provider_customer_link("r1".into(), 2, "r2".into(), 1, 0)
+            .add_provider_customer_link("r1", 2, "r2", 1, 0)
             .await;
         network
-            .add_provider_customer_link("r4".into(), 1, "r3".into(), 3, 0)
+            .add_provider_customer_link("r4", 1, "r3", 3, 0)
             .await;
         network
-            .add_provider_customer_link("r5".into(), 1, "r2".into(), 3, 0)
+            .add_provider_customer_link("r5", 1, "r2", 3, 0)
             .await;
         network
-            .add_provider_customer_link("r7".into(), 1, "r4".into(), 3, 0)
+            .add_provider_customer_link("r7", 1, "r4", 3, 0)
             .await;
         network
-            .add_provider_customer_link("r6".into(), 2, "r7".into(), 2, 0)
+            .add_provider_customer_link("r6", 2, "r7", 2, 0)
             .await;
         network
-            .add_provider_customer_link("r8".into(), 1, "r7".into(), 3, 0)
+            .add_provider_customer_link("r8", 1, "r7", 3, 0)
             .await;
 
         network
-            .add_peer_link("r2".into(), 2, "r3".into(), 2, 0)
+            .add_peer_link("r2", 2, "r3", 2, 0)
             .await;
         network
-            .add_peer_link("r4".into(), 2, "r5".into(), 2, 0)
+            .add_peer_link("r4", 2, "r5", 2, 0)
             .await;
         network
-            .add_peer_link("r5".into(), 3, "r6".into(), 1, 0)
+            .add_peer_link("r5", 3, "r6", 1, 0)
             .await;
         network
-            .add_peer_link("r6".into(), 3, "r8".into(), 2, 0)
+            .add_peer_link("r6", 3, "r8", 2, 0)
             .await;
 
-        network.announce_prefix("r2".into()).await;
+        network.announce_prefix("r2").await;
 
         // wait for convergence
         thread::sleep(Duration::from_millis(2000));
@@ -690,7 +690,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        assert_eq!(network.get_bgp_routes("r1".into()).await, routes1);
+        assert_eq!(network.get_bgp_routes("r1").await, routes1);
         network.quit().await;
     }
 
@@ -698,28 +698,28 @@ mod tests {
     async fn test_ibgp(){
         for _ in 0..5{
             let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
-            network.add_router("r1".into(), 1, 1);
-            network.add_router("r2".into(), 2, 1);
-            network.add_router("r3".into(), 3, 1);
-            network.add_router("r4".into(), 4, 2);
-            network.add_router("r5".into(), 5, 3);
+            network.add_router("r1", 1, 1);
+            network.add_router("r2", 2, 1);
+            network.add_router("r3", 3, 1);
+            network.add_router("r4", 4, 2);
+            network.add_router("r5", 5, 3);
         
             network
-                .add_provider_customer_link("r4".into(), 1, "r1".into(), 1, 0)
-                .await;
-        
-            network
-                .add_provider_customer_link("r3".into(), 1, "r5".into(), 3, 0)
+                .add_provider_customer_link("r4", 1, "r1", 1, 0)
                 .await;
         
             network
-                .add_link("r1".into(), 2, "r2".into(), 1, 0)
+                .add_provider_customer_link("r3", 1, "r5", 3, 0)
+                .await;
+        
+            network
+                .add_link("r1", 2, "r2", 1, 0)
                 .await;
             network
-                .add_link("r2".into(), 2, "r3".into(), 1, 0)
+                .add_link("r2", 2, "r3", 1, 0)
                 .await;
             network
-                .add_link("r1".into(), 3, "r3".into(), 2, 0)
+                .add_link("r1", 3, "r3", 2, 0)
                 .await;
         
             let routers = ["r1", "r2", "r3"];
@@ -732,12 +732,12 @@ mod tests {
             // wait for convergence
             thread::sleep(Duration::from_millis(250));
         
-            network.announce_prefix("r4".into()).await;
-            network.announce_prefix("r5".into()).await;
+            network.announce_prefix("r4").await;
+            network.announce_prefix("r5").await;
         
             thread::sleep(Duration::from_millis(250));
         
-            let bgp_table = network.get_bgp_routes("r2".into()).await;
+            let bgp_table = network.get_bgp_routes("r2").await;
             let mut expected_table = HashMap::new();
             expected_table.insert("10.0.2.4".parse().unwrap(), (Some(BGPRoute{
                 prefix: "10.0.2.4".parse().unwrap(),
