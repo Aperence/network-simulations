@@ -318,13 +318,11 @@ impl BGPState {
 
             if map_entry.len() == 0{
                 map_entry.push(route);
-            }else{
-                if map_entry[0].med > route.med{
-                    map_entry.clear();
-                    map_entry.push(route);
-                }else if map_entry[0].med == route.med{
-                    map_entry.push(route);
-                }
+            }else if map_entry[0].med > route.med{
+                map_entry.clear();
+                map_entry.push(route);
+            }else if map_entry[0].med == route.med{
+                map_entry.push(route);
             }
         }
 
@@ -345,10 +343,8 @@ impl BGPState {
                 if self.distance_nexthop(route.nexthop).await < self.distance_nexthop(best_route.nexthop).await{
                     best_route = route;
                 }
-            }else{
-                if route.router_id < best_route.router_id{
+            }else if route.router_id < best_route.router_id{
                     best_route = route;
-                }
             }
         }
 

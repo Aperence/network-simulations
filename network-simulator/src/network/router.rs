@@ -151,7 +151,6 @@ impl Router{
         }else if let Some((port, _)) = self.igp_state.lock().await.get_port(dest){
             let (_, sender, _) = info_router.neighbors.get(port).unwrap();
             sender.send(message).await.unwrap();
-        }else{
         }
     }
 
