@@ -76,7 +76,7 @@ impl OSPFState{
                 }
             }
         }
-        self.logger.log(Source::Debug, format!("Router {} has updated its routing table : {:?}", self.get_name().await, self.routing_table)).await;
+        self.logger.log(Source::OSPF, format!("Router {} has updated its routing table : {:?}", self.get_name().await, self.routing_table)).await;
     }
 
     pub async fn process_lsp(&mut self, from: Ipv4Addr, seq: u32, neighbors: HashSet<(u32, Ipv4Addr)>){

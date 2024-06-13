@@ -1,4 +1,5 @@
 use std::{cell::RefCell, collections::HashMap, net::Ipv4Addr, rc::Rc, sync::Arc, time::SystemTime};
+use log::info;
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
 use super::{logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::bgp::BGPState};
@@ -16,6 +17,7 @@ pub struct RouterInfo{
     pub ip: Ipv4Addr,
     pub neighbors: HashMap<u32, Neighbor>,
     pub bgp_links: HashMap<u32, BGPNeighbor>,
+    pub ibgp_peers: Vec<Ipv4Addr>
 }
 
 #[derive(Debug)]
@@ -40,7 +42,8 @@ impl Router{
             id, 
             router_as,
             neighbors: HashMap::new(), 
-            bgp_links: HashMap::new()
+            bgp_links: HashMap::new(),
+            ibgp_peers: vec![]
         }));
         let igp_state = Arc::new(Mutex::new(OSPFState::new(ip, logger.clone(), Arc::clone(&router_info))));
         let mut router = Router{
@@ -98,6 +101,7 @@ impl Router{
                 Message::OSPF(ospf) => self.igp_state.lock().await.process_ospf(ospf, port).await,
                 Message::IP(ip) => self.process_ip(ip).await,
                 Message::BGP(bgp_message) => self.bgp_state.lock().await.process_bgp_message(port, bgp_message).await,
+                Message::IBGP(ibgp_message) => self.bgp_state.lock().await.process_ibgp_message(port, ibgp_message).await,
             }
         }
     }
@@ -133,17 +137,22 @@ impl Router{
     }
 
     pub async fn send_message(&self, dest: Ipv4Addr, message: Message){
-        let info_router = self.router_info.lock().await;
-        let igp_state = self.igp_state.lock().await;
         let bgp_state = self.bgp_state.lock().await;
+        let info_router = self.router_info.lock().await;
         if let Some(nexthop) = bgp_state.get_nexthop(dest).await{
+            let igp_state = self.igp_state.lock().await;
             if let Some((port, _)) = igp_state.get_port(nexthop){
-                let (_, sender, _, _) = info_router.bgp_links.get(port).unwrap();
-                sender.send(message).await.unwrap();
+                if let Some((_, sender, _, _)) = info_router.bgp_links.get(port){
+                    sender.send(message).await.unwrap();
+                }else{
+                    let (_, sender, _) = info_router.neighbors.get(port).unwrap();
+                    sender.send(message).await.unwrap();
+                }
             }
-        }else if let Some((port, _)) = igp_state.get_port(dest){
+        }else if let Some((port, _)) = self.igp_state.lock().await.get_port(dest){
             let (_, sender, _) = info_router.neighbors.get(port).unwrap();
             sender.send(message).await.unwrap();
+        }else{
         }
     }
 
@@ -214,6 +223,12 @@ impl Router{
                             routes.insert(*prefix, (best_route, r.clone()));
                         }
                         self.command_replier.send(Response::BGPRoutes(routes)).await.expect("Failed to send the routing table");
+                        false
+                    },
+                    Command::AddIBGP(peer_addr) => {
+                        let mut info = self.router_info.lock().await;
+                        self.logger.log(Source::Debug, format!("Router {} received adding ibp connection to {}", info.name, peer_addr)).await;
+                        info.ibgp_peers.push(peer_addr);
                         false
                     },
                 }

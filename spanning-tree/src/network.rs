@@ -61,6 +61,10 @@ impl Network {
         );
     }
 
+    pub fn routers(&self) -> Vec<String>{
+        self.routers.keys().map(|r| r.clone()).into_iter().collect()
+    }
+
     pub async fn add_peer_link(
         &mut self,
         device1: String,
@@ -139,6 +143,24 @@ impl Network {
         };
 
         self.links.push((device1, port1, device2, port2, cost));
+    }
+
+    pub async fn add_ibgp_connection(
+        &mut self,
+        device1: String,
+        device2: String,
+    ) {
+        let (d1, ip1) = self
+            .routers
+            .get(&device1)
+            .expect(format!("Unknown device {}", device1).as_str());
+        let (d2, ip2) = self
+            .routers
+            .get(&device2)
+            .expect(format!("Unknown device {}", device2).as_str());
+
+        d1.add_ibgp_connection(*ip2).await;
+        d2.add_ibgp_connection(*ip1).await;
     }
 
     pub async fn ping(&self, from: String, to: Ipv4Addr) {
@@ -451,7 +473,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 16)]
     async fn test_bgp() {
         for _ in 0..5 {
             let mut network = Network::new_with_filters(vec![Source::BGP]);

@@ -11,37 +11,52 @@ use self::network::Network;
 async fn main() -> Result<(), ()> {
     env_logger::init(); // you can run using `RUST_LOG=debug cargo run` to get more details on what messages the switches are exchanging
 
-    let mut network = Network::new_with_filters(vec![Source::Ping, Source::BGP]);
+    let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
     network.add_router("r1".into(), 1, 1);
-    network.add_router("r2".into(), 2, 2);
-    network.add_router("r3".into(), 3, 3);
-    network.add_router("r4".into(), 4, 4);
-    network.add_router("r5".into(), 5, 5);
-    network.add_router("r6".into(), 6, 6);
-    network.add_router("r7".into(), 7, 7);
-    network.add_router("r8".into(), 8, 8);
+    network.add_router("r2".into(), 2, 1);
+    network.add_router("r3".into(), 3, 1);
+    network.add_router("r4".into(), 4, 2);
+    network.add_router("r5".into(), 5, 3);
 
+    network
+        .add_provider_customer_link("r4".into(), 1, "r1".into(), 1, 0)
+        .await;
 
-    network.add_provider_customer_link("r3".into(), 1, "r1".into(), 1, 0).await;
-    network.add_provider_customer_link("r1".into(), 2, "r2".into(), 1, 0).await;
-    network.add_provider_customer_link("r4".into(), 1, "r3".into(), 3, 0).await;
-    network.add_provider_customer_link("r5".into(), 1, "r2".into(), 3, 0).await;
-    network.add_provider_customer_link("r7".into(), 1, "r4".into(), 3, 0).await;
-    network.add_provider_customer_link("r6".into(), 2, "r7".into(), 2, 0).await;
-    network.add_provider_customer_link("r8".into(), 1, "r7".into(), 3, 0).await;
+    network
+        .add_provider_customer_link("r3".into(), 1, "r5".into(), 3, 0)
+        .await;
 
-    network.add_peer_link("r2".into(), 2, "r3".into(), 2, 0).await;
-    network.add_peer_link("r4".into(), 2, "r5".into(), 2, 0).await;
-    network.add_peer_link("r5".into(), 3, "r6".into(), 1, 0).await;
-    network.add_peer_link("r6".into(), 3, "r8".into(), 2, 0).await;
+    network
+        .add_link("r1".into(), 2, "r2".into(), 1, 0)
+        .await;
+    network
+        .add_link("r2".into(), 2, "r3".into(), 1, 0)
+        .await;
+    network
+        .add_link("r1".into(), 3, "r3".into(), 2, 0)
+        .await;
 
-
-    network.announce_prefix("r2".into()).await;
+    let routers = ["r1", "r2", "r3"];
+    for i in 0..routers.len(){
+        for j in i+1..routers.len(){
+            network.add_ibgp_connection(routers[i].into(), routers[j].into()).await;
+        }
+    }
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(250));
+
+    network.print_routing_tables().await;
+
+    network.announce_prefix("r4".into()).await;
+    network.announce_prefix("r5".into()).await;
+
+    thread::sleep(Duration::from_millis(500));
 
     network.print_bgp_tables().await;
+    network.ping("r4".into(), "10.0.3.5".parse().unwrap()).await;
+
+    thread::sleep(Duration::from_millis(1000));
 
     network.quit().await;
 

@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use crate::network::{
     logger::{Logger, Source},
-    messages::{bgp::BGPMessage, Message},
+    messages::{bgp::{BGPMessage, IBGPMessage}, Message},
     router::RouterInfo,
 };
 
@@ -64,6 +64,17 @@ impl BGPState {
         }
     }
 
+    pub async fn process_ibgp_message(&mut self, port:u32, message: IBGPMessage) {
+        match message {
+            IBGPMessage::Update(prefix, nexthop, as_path, pref, med, router_id) => {
+                self.process_update_ibgp(port, prefix, nexthop, as_path, pref, med, router_id).await
+            }
+            IBGPMessage::Withdraw(prefix, nexthop, as_path, router_id) => {
+                self.process_withdraw_ibgp(port, prefix, nexthop, as_path, router_id).await
+            }
+        }
+    }
+
     pub async fn process_update(
         &mut self,
         port: u32,
@@ -95,16 +106,18 @@ impl BGPState {
 
         routes.insert(route);
 
-        info!("Router {} has routes {:?}", name, routes);
-
         let best = self.decision_process(prefix).await;
 
         if previous_best != best{
             if let Some(previous_best_route) = previous_best{
-                self.send_withdraw(previous_best_route.prefix, ip, previous_best_route.as_path).await;
+                self.send_withdraw(previous_best_route.prefix, ip, previous_best_route.as_path.clone()).await;
+                if previous_best_route.source != RouteSource::IBGP{
+                    self.send_ibgp_withdraw(previous_best_route.prefix, previous_best_route.as_path).await;
+                }
             }
             let best = best.unwrap();
-            self.send_update(best.prefix, ip, best.as_path, best.pref).await;
+            self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
+            self.send_ibgp_update(best.prefix, best.as_path, best.pref, best.med).await;
         }
     }
 
@@ -143,18 +156,111 @@ impl BGPState {
         
         self.routes.insert(prefix, new_routes);
 
-        info!("Router {} has new routes after withdraw : {:?}", name, self.routes);
-
         if best_removed{
             let previous_best = previous_best.unwrap();
-            self.send_withdraw(prefix, ip, previous_best.as_path).await;
+            self.send_withdraw(prefix, ip, previous_best.as_path.clone()).await;
+            if previous_best.source == RouteSource::EBGP{
+                self.send_ibgp_withdraw(prefix, previous_best.as_path).await;
+            }
 
             let new_best = self.decision_process(prefix).await;
             if let Some(new_best_route) = new_best{
-                self.send_update(prefix, ip, new_best_route.as_path, new_best_route.pref).await;
+                self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
+                if new_best_route.source != RouteSource::IBGP{
+                    self.send_ibgp_update(new_best_route.prefix, new_best_route.as_path, new_best_route.pref, new_best_route.med).await;
+                }
             }
         }
         
+    }
+
+    pub async fn process_update_ibgp(
+        &mut self,
+        port: u32,
+        prefix: Ipv4Addr,
+        nexthop: Ipv4Addr,
+        as_path: Vec<u32>,
+        pref: u32,
+        med: u32,
+        router_id: u32
+    ){
+        let info = self.router_info.lock().await;
+        let name = info.name.clone();
+        let ip = info.ip;
+        drop(info);
+        self.logger.borrow().log(Source::BGP, format!("Router {} received ibgp update on port {} for prefix {} with nexthop = {}, AS path = {:?}, med = {}", name, port, prefix, nexthop, as_path, med)).await;
+        let route = BGPRoute{prefix, nexthop, as_path, pref, med, source: RouteSource::IBGP, router_id};
+
+        let previous_best = self.decision_process(prefix).await;
+
+        let routes = match self.routes.entry(prefix) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => v.insert(HashSet::new()),
+        };
+
+        routes.insert(route);
+
+        let best = self.decision_process(prefix).await;
+
+        if previous_best != best{
+            if let Some(previous_best_route) = previous_best{
+                self.send_withdraw(previous_best_route.prefix, ip, previous_best_route.as_path.clone()).await;
+                if previous_best_route.source != RouteSource::IBGP{
+                    self.send_ibgp_withdraw(previous_best_route.prefix, previous_best_route.as_path).await;
+                }
+            }
+            let best = best.unwrap();
+            self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
+            // suppose fullmesh, no need to readvertise new best to other ibgp peers
+        }
+    }
+
+    pub async fn process_withdraw_ibgp(&mut self, port: u32, prefix: Ipv4Addr, nexthop: Ipv4Addr, as_path: Vec<u32>, router_id: u32) {
+        let info = self.router_info.lock().await;
+        let name = info.name.clone();
+        let ip = info.ip;
+        drop(info);
+        self.logger.borrow().log(Source::BGP, format!("Router {} received ibgp withdraw on port {} for prefix {} with nexthop = {}, AS path = {:?}", name, port, prefix, nexthop, as_path)).await;
+    
+        let previous_best = self.decision_process(prefix).await;
+
+        let routes = self.routes.get(&prefix);
+
+        if let None = routes{
+            return;
+        }
+
+        let routes = routes.unwrap();
+
+        let mut new_routes = HashSet::new();
+        let mut best_removed = false;
+        for route in routes{
+            if route.nexthop == nexthop && route.router_id == router_id && route.as_path == as_path{
+                if let Some(r) = &previous_best{
+                    best_removed = best_removed || route.nexthop == r.nexthop && route.router_id == r.router_id && route.as_path == r.as_path ; 
+                }
+            }else{
+                new_routes.insert(route.clone());
+            }
+        }
+        
+        self.routes.insert(prefix, new_routes);
+
+        if best_removed{
+            let previous_best = previous_best.unwrap();
+            self.send_withdraw(prefix, ip, previous_best.as_path.clone()).await;
+            if previous_best.source == RouteSource::EBGP{
+                self.send_ibgp_withdraw(prefix, previous_best.as_path).await;
+            }
+
+            let new_best = self.decision_process(prefix).await;
+            if let Some(new_best_route) = new_best{
+                self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
+                if new_best_route.source != RouteSource::IBGP{
+                    self.send_ibgp_update(new_best_route.prefix, new_best_route.as_path, new_best_route.pref, new_best_route.med).await;
+                }
+            }
+        }
     }
 
     pub async fn distance_nexthop(&self, nexthop: Ipv4Addr){
@@ -256,6 +362,18 @@ impl BGPState {
         }
     }
 
+    pub async fn send_ibgp_update(&self, prefix: Ipv4Addr, as_path: Vec<u32>, pref_from: u32, med: u32) {
+        let igp_state = self.igp_info.lock().await;
+        let info = self.router_info.lock().await;
+        for peer_addr in info.ibgp_peers.iter() {
+            let message = IBGPMessage::Update(prefix, info.ip, as_path.clone(), pref_from, med, info.id);
+            if let Some((port, _)) = igp_state.get_port(*peer_addr){
+                let (_, sender, _) = info.neighbors.get(port).unwrap();
+                sender.send(Message::IBGP(message)).await.unwrap();
+            }
+        }
+    }
+
     pub async fn send_withdraw(&self, prefix: Ipv4Addr, nexthop: Ipv4Addr, mut as_path: Vec<u32>) {
         let info = self.router_info.lock().await;
         as_path.insert(0, info.router_as);
@@ -267,6 +385,19 @@ impl BGPState {
                 .expect("Failed to send bgp message");
         }
     }
+
+    pub async fn send_ibgp_withdraw(&self, prefix: Ipv4Addr, as_path: Vec<u32>) {
+        let igp_state = self.igp_info.lock().await;
+        let info = self.router_info.lock().await;
+        for peer_addr in info.ibgp_peers.iter() {
+            let message = IBGPMessage::Withdraw(prefix, info.ip, as_path.clone(), info.id);
+            if let Some((port, _)) = igp_state.get_port(*peer_addr){
+                let (_, sender, _) = info.neighbors.get(port).unwrap();
+                sender.send(Message::IBGP(message)).await.unwrap();
+            }
+        }
+    }
+
 
     pub async fn announce_prefix(&self) {
         let info = self.router_info.lock().await;

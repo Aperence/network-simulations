@@ -6,7 +6,7 @@ pub mod bgp;
 use bpdu::BPDU;
 use ospf::OSPFMessage;
 use ip::IP;
-use bgp::BGPMessage;
+use bgp::{BGPMessage, IBGPMessage};
 
 
 #[derive(Debug, Clone)]
@@ -14,5 +14,6 @@ pub enum Message{
     BPDU(BPDU),
     OSPF(OSPFMessage),
     IP(IP),
-    BGP(BGPMessage)
+    BGP(BGPMessage),
+    IBGP(IBGPMessage)
 }

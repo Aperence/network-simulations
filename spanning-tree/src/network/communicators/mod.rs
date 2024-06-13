@@ -13,6 +13,7 @@ pub enum Command{
     AddPeerLink(Receiver<Message>, Sender<Message>, u32, u32, Ipv4Addr),
     AddProvider(Receiver<Message>, Sender<Message>, u32, u32, Ipv4Addr),
     AddCustomer(Receiver<Message>, Sender<Message>, u32, u32, Ipv4Addr),
+    AddIBGP(Ipv4Addr),
     Ping(Ipv4Addr),
     AnnouncePrefix,
     Quit
@@ -63,15 +64,19 @@ impl RouterCommunicator {
     }
 
     pub async fn add_peer_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32, other_ip: Ipv4Addr) {
-        self.command_sender.send(Command::AddPeerLink(receiver, sender, port, med, other_ip)).await.expect("Failed to send add link command");
+        self.command_sender.send(Command::AddPeerLink(receiver, sender, port, med, other_ip)).await.expect("Failed to send add peer link command");
     }
 
     pub async fn add_customer_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32, other_ip: Ipv4Addr) {
-        self.command_sender.send(Command::AddCustomer(receiver, sender, port, med, other_ip)).await.expect("Failed to send add link command");
+        self.command_sender.send(Command::AddCustomer(receiver, sender, port, med, other_ip)).await.expect("Failed to send add customer link command");
     }
 
     pub async fn add_provider_link(&self, receiver: Receiver<Message>, sender: Sender<Message>, port: u32, med: u32, other_ip: Ipv4Addr) {
-        self.command_sender.send(Command::AddProvider(receiver, sender, port, med, other_ip)).await.expect("Failed to send add link command");
+        self.command_sender.send(Command::AddProvider(receiver, sender, port, med, other_ip)).await.expect("Failed to send add provider link command");
+    }
+
+    pub async fn add_ibgp_connection(&self, other_ip: Ipv4Addr) {
+        self.command_sender.send(Command::AddIBGP(other_ip)).await.expect("Failed to send add ibgp command");
     }
 
     pub async fn ping(&self, ip: Ipv4Addr){

@@ -109,6 +109,7 @@ impl Switch{
                     Command::AddCustomer(_, _, _, _, _) => panic!("Adding customer link not supported on switch"),
                     Command::AnnouncePrefix => panic!("Announcing prefix not supported on switch"),
                     Command::BGPRoutes => panic!("BGPRoutes not supported on switch"),
+                    Command::AddIBGP(_) => panic!("AddIBGP not supported on switch"),
                 }
             },
             Err(_) => false,
