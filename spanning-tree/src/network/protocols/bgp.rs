@@ -1,6 +1,5 @@
 use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap, HashSet}, fmt::Display, net::Ipv4Addr, sync::Arc};
 
-use log::info;
 use tokio::sync::Mutex;
 
 use crate::network::{
@@ -75,6 +74,12 @@ impl BGPState {
         }
     }
 
+    pub async fn install_route(&self, route: BGPRoute){
+        let mut igp_state = self.igp_info.lock().await;
+        let port = igp_state.get_port(route.nexthop).unwrap().clone();
+        igp_state.routing_table.insert(route.prefix, port);
+    }
+
     pub async fn process_update(
         &mut self,
         port: u32,
@@ -116,6 +121,7 @@ impl BGPState {
                 }
             }
             let best = best.unwrap();
+            self.install_route(best.clone()).await;
             self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
             self.send_ibgp_update(best.prefix, best.as_path, best.pref, best.med).await;
         }
@@ -165,6 +171,7 @@ impl BGPState {
 
             let new_best = self.decision_process(prefix).await;
             if let Some(new_best_route) = new_best{
+                self.install_route(new_best_route.clone()).await;
                 self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
                 if new_best_route.source != RouteSource::IBGP{
                     self.send_ibgp_update(new_best_route.prefix, new_best_route.as_path, new_best_route.pref, new_best_route.med).await;
@@ -210,6 +217,7 @@ impl BGPState {
                 }
             }
             let best = best.unwrap();
+            self.install_route(best.clone()).await;
             self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
             // suppose fullmesh, no need to readvertise new best to other ibgp peers
         }
@@ -255,6 +263,7 @@ impl BGPState {
 
             let new_best = self.decision_process(prefix).await;
             if let Some(new_best_route) = new_best{
+                self.install_route(new_best_route.clone()).await;
                 self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
                 if new_best_route.source != RouteSource::IBGP{
                     self.send_ibgp_update(new_best_route.prefix, new_best_route.as_path, new_best_route.pref, new_best_route.med).await;

@@ -1,5 +1,4 @@
 use std::{cell::RefCell, collections::HashMap, net::Ipv4Addr, rc::Rc, sync::Arc, time::SystemTime};
-use log::info;
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
 use super::{logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::bgp::BGPState};

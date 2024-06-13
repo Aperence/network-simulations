@@ -1,11 +1,8 @@
-
-pub mod network;
-
 use std::{thread, time::Duration};
 
-use network::logger::Source;
+use network_simulator::network::logger::Source;
 
-use self::network::Network;
+use network_simulator::network::Network;
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -51,12 +48,12 @@ async fn main() -> Result<(), ()> {
     network.announce_prefix("r4".into()).await;
     network.announce_prefix("r5".into()).await;
 
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(500));
 
-    network.print_routing_tables().await;
+    network.print_bgp_tables().await;
     network.ping("r4".into(), "10.0.3.5".parse().unwrap()).await;
 
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(1000));
 
     network.quit().await;
 

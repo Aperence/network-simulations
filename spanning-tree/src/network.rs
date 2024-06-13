@@ -297,7 +297,7 @@ mod tests {
     use std::time::Duration;
     use PortState::*;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_spanning_tree() {
         for _ in 0..10 {
             let mut network = Network::new();
@@ -357,7 +357,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_ospf() {
         for _ in 0..10 {
             let mut network = Network::new_with_filters(vec![Source::Ping]);
@@ -426,7 +426,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_mix_switches_routers() {
         for _ in 0..10 {
             let mut network = Network::new_with_filters(vec![]);
@@ -473,7 +473,8 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 16)]
+    
+    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     async fn test_bgp() {
         for _ in 0..5 {
             let mut network = Network::new_with_filters(vec![Source::BGP]);
@@ -691,5 +692,94 @@ mod tests {
 
         assert_eq!(network.get_bgp_routes("r1".into()).await, routes1);
         network.quit().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+    async fn test_ibgp(){
+        for _ in 0..5{
+            let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
+            network.add_router("r1".into(), 1, 1);
+            network.add_router("r2".into(), 2, 1);
+            network.add_router("r3".into(), 3, 1);
+            network.add_router("r4".into(), 4, 2);
+            network.add_router("r5".into(), 5, 3);
+        
+            network
+                .add_provider_customer_link("r4".into(), 1, "r1".into(), 1, 0)
+                .await;
+        
+            network
+                .add_provider_customer_link("r3".into(), 1, "r5".into(), 3, 0)
+                .await;
+        
+            network
+                .add_link("r1".into(), 2, "r2".into(), 1, 0)
+                .await;
+            network
+                .add_link("r2".into(), 2, "r3".into(), 1, 0)
+                .await;
+            network
+                .add_link("r1".into(), 3, "r3".into(), 2, 0)
+                .await;
+        
+            let routers = ["r1", "r2", "r3"];
+            for i in 0..routers.len(){
+                for j in i+1..routers.len(){
+                    network.add_ibgp_connection(routers[i].into(), routers[j].into()).await;
+                }
+            }
+        
+            // wait for convergence
+            thread::sleep(Duration::from_millis(250));
+        
+            network.announce_prefix("r4".into()).await;
+            network.announce_prefix("r5".into()).await;
+        
+            thread::sleep(Duration::from_millis(250));
+        
+            let bgp_table = network.get_bgp_routes("r2".into()).await;
+            let mut expected_table = HashMap::new();
+            expected_table.insert("10.0.2.4".parse().unwrap(), (Some(BGPRoute{
+                prefix: "10.0.2.4".parse().unwrap(),
+                nexthop: "10.0.1.1".parse().unwrap(),
+                as_path: vec![2],
+                pref: 50,
+                med: 0,
+                router_id: 1,
+                source: RouteSource::IBGP,
+            }), [BGPRoute{
+                prefix: "10.0.2.4".parse().unwrap(),
+                nexthop: "10.0.1.1".parse().unwrap(),
+                as_path: vec![2],
+                pref: 50,
+                med: 0,
+                router_id: 1,
+                source: RouteSource::IBGP,
+            }].into_iter().collect()));
+
+            expected_table.insert("10.0.3.5".parse().unwrap(), (Some(BGPRoute{
+                prefix: "10.0.3.5".parse().unwrap(),
+                nexthop: "10.0.1.3".parse().unwrap(),
+                as_path: vec![3],
+                pref: 150,
+                med: 0,
+                router_id: 3,
+                source: RouteSource::IBGP,
+            }), [BGPRoute{
+                prefix: "10.0.3.5".parse().unwrap(),
+                nexthop: "10.0.1.3".parse().unwrap(),
+                as_path: vec![3],
+                pref: 150,
+                med: 0,
+                router_id: 3,
+                source: RouteSource::IBGP,
+            }].into_iter().collect()));
+            assert_eq!(bgp_table, expected_table);
+            
+        
+            thread::sleep(Duration::from_millis(250));
+        
+            network.quit().await;
+        }
     }
 }
