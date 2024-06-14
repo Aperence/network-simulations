@@ -11,7 +11,7 @@ use self::network::Network;
 async fn main() -> Result<(), ()> {
     env_logger::init(); // you can run using `RUST_LOG=debug cargo run` to get more details on what messages the switches are exchanging
 
-    let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
+    let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping, Source::IP]);
     network.add_router("r1", 1, 1);
     network.add_router("r2", 2, 1);
     network.add_router("r3", 3, 1);

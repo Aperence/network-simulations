@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, net::Ipv4Addr, rc::Rc, sync::Arc, time::SystemTime};
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
-use super::{logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::{arp::{ArpState, MacAddress}, bgp::BGPState}};
+use super::{ip_trie::IPPrefix, logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::{arp::{ArpState, MacAddress}, bgp::BGPState}};
 use super::communicators::{RouterCommunicator, Command, Response};
 use super::protocols::ospf::OSPFState;
 
@@ -78,7 +78,7 @@ impl Router{
                 igp_state.send_hello().await;
                 let arp_state = self.arp_state.lock().await;
                 for (_, port, ip) in igp_state.direct_neighbors.iter(){
-                    arp_state.resolve(*ip, *port).await;
+                    arp_state.resolve(ip.ip, *port).await;
                 }
             }
         }
@@ -124,6 +124,7 @@ impl Router{
     pub async fn process_ip(&self, port: u32, ip_packet: IP){
         let info = self.router_info.lock().await;
         let ip = info.ip.clone();
+        self.logger.log(Source::IP, format!("Router {} received ip packet {:?}", info.name, ip_packet)).await;
         drop(info);
         if ip_packet.dest == ip{
             self.process_ip_content(port, ip_packet).await;
@@ -198,7 +199,11 @@ impl Router{
                         self.logger.log(Source::Debug, format!("Router {} received adding peer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 100, med));
-                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
+                        let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
+                        let mut igp_state = self.igp_state.lock().await;
+                        igp_state.routing_table.insert(prefix, (port, 1));
+                        igp_state.prefixes.insert(prefix, prefix);
+                        igp_state.direct_neighbors.insert((1, port, prefix));
                         false
                     },
                     Command::AddProvider(receiver, sender, port, med, other_ip) => {
@@ -206,7 +211,11 @@ impl Router{
                         self.logger.log(Source::Debug, format!("Router {} received adding provider link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 50, med));
-                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
+                        let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
+                        let mut igp_state = self.igp_state.lock().await;
+                        igp_state.routing_table.insert(prefix, (port, 1));
+                        igp_state.prefixes.insert(prefix, prefix);
+                        igp_state.direct_neighbors.insert((1, port, prefix));
                         false
                     },
                     Command::AddCustomer(receiver, sender, port, med, other_ip) => {
@@ -214,7 +223,11 @@ impl Router{
                         self.logger.log(Source::Debug, format!("Router {} received adding customer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 150, med));
-                        self.igp_state.lock().await.routing_table.insert(other_ip, (port, 1));
+                        let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
+                        let mut igp_state = self.igp_state.lock().await;
+                        igp_state.routing_table.insert(prefix, (port, 1));
+                        igp_state.prefixes.insert(prefix, prefix);
+                        igp_state.direct_neighbors.insert((1, port, prefix));
                         false
                     },
                     Command::AnnouncePrefix => {

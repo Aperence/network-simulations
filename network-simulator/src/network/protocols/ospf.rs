@@ -2,14 +2,14 @@ use std::{collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet}, net::Ipv
 
 use tokio::sync::{mpsc::Sender, Mutex};
 
-use crate::network::{logger::{Logger, Source}, messages::{ip::IP, ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo};
+use crate::network::{ip_trie::{IPPrefix, IPTrie}, logger::{Logger, Source}, messages::{ip::IP, ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo};
 
 use super::arp::{ArpState, MacAddress};
 
 #[derive(Ord, PartialEq, Eq, Hash, Clone)]
 pub struct Node{
     distance: u32,
-    ip: Ipv4Addr,
+    ip: IPPrefix,
     port: u32
 }
 
@@ -21,9 +21,10 @@ impl PartialOrd for Node{
 
 #[derive(Debug)]
 pub struct OSPFState{
-    pub topo: HashMap<Ipv4Addr, HashSet<(u32, Ipv4Addr)>>,
-    pub direct_neighbors: HashSet<(u32, u32, Ipv4Addr)>,
-    pub routing_table: HashMap<Ipv4Addr, (u32, u32)>,  // (port, distance)
+    pub topo: HashMap<Ipv4Addr, HashSet<(u32, IPPrefix)>>,
+    pub direct_neighbors: HashSet<(u32, u32, IPPrefix)>,
+    pub routing_table: HashMap<IPPrefix, (u32, u32)>,  // (port, distance)
+    pub prefixes: IPTrie<IPPrefix>,
     pub received_lsp: HashSet<(Ipv4Addr, u32)>,
     pub lsp_seq: u32,
     pub router_info: Arc<Mutex<RouterInfo>>,
@@ -33,10 +34,14 @@ pub struct OSPFState{
 
 impl OSPFState{
     pub fn new(ip: Ipv4Addr, logger: Logger, router_info: Arc<Mutex<RouterInfo>>, arp_state: Arc<Mutex<ArpState>>) -> OSPFState{
+        let prefix = IPPrefix{ip, prefix_len: 32};
+        let mut prefixes = IPTrie::new();
+        prefixes.insert(prefix, prefix);
         OSPFState{
             topo: HashMap::new(),
             direct_neighbors: HashSet::new(),
-            routing_table: [(ip, (0, 0))].into_iter().collect(),
+            routing_table: [(prefix, (0, 0))].into_iter().collect(),
+            prefixes,
             received_lsp: HashSet::new(),
             lsp_seq: 0,
             router_info,
@@ -46,8 +51,8 @@ impl OSPFState{
     }
 
     pub async fn send_message(&self, nexthop: Ipv4Addr, content: IP){
-        let info_router = self.router_info.lock().await;
         if let Some((port, mac)) = self.get_port_mac(nexthop).await{
+            let info_router = self.router_info.lock().await;
             if let Some((_, sender, _, _)) = info_router.bgp_links.get(&port){
                 sender.send(Message::EthernetFrame(mac, content)).await.unwrap();
             }else{
@@ -58,30 +63,24 @@ impl OSPFState{
     }
 
     pub async fn get_port_mac(&self, ip: Ipv4Addr) -> Option<(u32, MacAddress)>{
-        let p = self.routing_table.get(&ip);
-        if let Some((port, _)) = p{
-            for (_, p, ip) in self.direct_neighbors.iter(){
-                if p == port{
-                    let arp_state = self.arp_state.lock().await;
-                    let mac_address = arp_state.mapping.get(ip);
-                    if mac_address.is_some(){
-                        return Some((*p, mac_address.unwrap().clone()));
-                    }
+        let prefix = self.prefixes.longest_match(ip)?;
+        let (port, _) = self.routing_table.get(&prefix)?;
+        for (_, p, prefix) in self.direct_neighbors.iter(){
+            if p == port{
+                let arp_state = self.arp_state.lock().await;
+                let mac_address = arp_state.mapping.get(&prefix.ip);
+                if mac_address.is_some(){
+                    return Some((*p, mac_address.unwrap().clone()));
                 }
             }
-            None
-        }else{
-            None
         }
+        None
     }
 
     pub async fn get_port(&self, ip: Ipv4Addr) -> Option<u32>{
-        let p = self.routing_table.get(&ip);
-        if let Some((port, _)) = p{
-            Some(*port)
-        }else{
-            None
-        }
+        let prefix = self.prefixes.longest_match(ip)?;
+        let (port, _) = self.routing_table.get(&prefix)?;
+        Some(*port)
     }
 
     pub async fn process_ospf(&mut self, ospf: OSPFMessage, port: u32){
@@ -103,12 +102,13 @@ impl OSPFState{
 
         while !pq.is_empty(){
             let p = pq.pop().unwrap();
-            if visited.contains(&p.ip){
+            if visited.contains(&p.ip.ip){
                 continue;
             }
             self.routing_table.insert(p.ip, (p.port, p.distance));
-            visited.insert(p.ip.clone());
-            let neighs = self.topo.get(&p.ip);
+            self.prefixes.insert(p.ip, p.ip);
+            visited.insert(p.ip.ip);
+            let neighs = self.topo.get(&p.ip.ip);
             if let Some(n) = neighs{
                 for (cost, neigh) in n{
                     pq.push(Node{distance: p.distance+cost, ip: *neigh, port: p.port});
@@ -118,7 +118,7 @@ impl OSPFState{
         self.logger.log(Source::OSPF, format!("Router {} has updated its routing table : {:?}", self.get_name().await, self.routing_table)).await;
     }
 
-    pub async fn process_lsp(&mut self, from: Ipv4Addr, seq: u32, neighbors: HashSet<(u32, Ipv4Addr)>){
+    pub async fn process_lsp(&mut self, from: Ipv4Addr, seq: u32, neighbors: HashSet<(u32, IPPrefix)>){
         if self.received_lsp.contains(&(from, seq)){
             return;
         }
@@ -134,8 +134,8 @@ impl OSPFState{
         self.send_lsp(OSPFMessage::LSP(from, seq, neighbors)).await; // flood
     }
 
-    pub async fn process_hello_reply(&mut self, ip: Ipv4Addr, port: u32){
-        if self.get_ip().await == ip{
+    pub async fn process_hello_reply(&mut self, ip: IPPrefix, port: u32){
+        if self.get_ip().await == ip.ip{
             return;
         }
         let map = self.get_neighbors().await;
@@ -184,7 +184,8 @@ impl OSPFState{
         let map = self.get_neighbors().await;
         let (sender, _) = map.get(&port).unwrap();
         self.logger.log(Source::OSPF, format!("Router {} sending hello reply on port {}", self.get_name().await, port)).await;
-        sender.send(Message::OSPF(OSPFMessage::HelloReply(self.get_ip().await))).await.expect("Failed to send Hello reply");
+        let prefix = IPPrefix{ip: self.get_ip().await, prefix_len: 32};
+        sender.send(Message::OSPF(OSPFMessage::HelloReply(prefix))).await.expect("Failed to send Hello reply");
     }
 
     pub async fn get_ip(&self) -> Ipv4Addr{

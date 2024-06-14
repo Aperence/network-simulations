@@ -5,6 +5,7 @@ pub mod protocols;
 pub mod ip_trie;
 pub mod router;
 pub mod switch;
+use ip_trie::IPPrefix;
 use logger::{Logger, Source};
 use protocols::bgp::BGPRoute;
 use std::{
@@ -25,6 +26,7 @@ pub struct Network {
     routers: BTreeMap<String, (RouterCommunicator, Ipv4Addr)>,
     used_port: BTreeMap<String, HashSet<u32>>,
     links: Vec<(String, u32, String, u32, u32)>,
+    router_as: HashMap<u32, Vec<String>>,
     logger: Logger,
 }
 
@@ -35,6 +37,7 @@ impl Network {
             routers: BTreeMap::new(),
             used_port: BTreeMap::new(),
             links: vec![],
+            router_as: HashMap::new(),
             logger: Logger::start(),
         }
     }
@@ -45,6 +48,7 @@ impl Network {
             routers: BTreeMap::new(),
             used_port: BTreeMap::new(),
             links: vec![],
+            router_as: HashMap::new(),
             logger: Logger::start_with_filters(filters),
         }
     }
@@ -65,6 +69,7 @@ impl Network {
                 Ipv4Addr::new(10, 0, router_as as u8, id as u8),
             ),
         );
+        self.router_as.entry(router_as).or_insert(vec![]).push(name.to_string());
     }
 
     pub fn routers(&self) -> Vec<String>{
@@ -191,12 +196,18 @@ impl Network {
     }
 
     pub async fn announce_prefix(&self, router: &str) {
-        let router = &self.routers.get(&router.to_string()).expect("Unknown router").0;
+        let router = &self.routers.get(router).expect("Unknown router").0;
 
         router.announce_prefix().await;
     }
 
-    pub async fn get_routing_table(&self, router: &str) -> HashMap<Ipv4Addr, (u32, u32)> {
+    pub async fn announce_prefix_as(&self, announcing_as: u32) {
+        for router in self.router_as.get(&announcing_as).unwrap(){
+            self.announce_prefix(router).await;
+        }
+    }
+
+    pub async fn get_routing_table(&self, router: &str) -> HashMap<IPPrefix, (u32, u32)> {
         let src = &self.routers.get(&router.to_string()).expect("Unknown router").0;
 
         src.get_routing_table()
@@ -207,7 +218,7 @@ impl Network {
     pub async fn get_bgp_routes(
         &self,
         router: &str,
-    ) -> HashMap<Ipv4Addr, (Option<BGPRoute>, HashSet<BGPRoute>)> {
+    ) -> HashMap<IPPrefix, (Option<BGPRoute>, HashSet<BGPRoute>)> {
         let src = &self.routers.get(&router.to_string()).expect("Unknown router").0;
 
         src.get_bgp_routes()
@@ -398,10 +409,10 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r1").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (0, 0)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (1, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 3), (2, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 4), (2, 2))
+                    ("10.0.1.1/32".parse().unwrap(), (0, 0)),
+                    ("10.0.1.2/32".parse().unwrap(), (1, 1)),
+                    ("10.0.1.3/32".parse().unwrap(), (2, 1)),
+                    ("10.0.1.4/32".parse().unwrap(), (2, 2))
                 ]
                 .into_iter()
                 .collect()
@@ -410,10 +421,10 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r2").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (0, 0)),
-                    (Ipv4Addr::new(10, 0, 1, 3), (2, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 4), (2, 2))
+                    ("10.0.1.1/32".parse().unwrap(), (1, 1)),
+                    ("10.0.1.2/32".parse().unwrap(), (0, 0)),
+                    ("10.0.1.3/32".parse().unwrap(), (2, 1)),
+                    ("10.0.1.4/32".parse().unwrap(), (2, 2))
                 ]
                 .into_iter()
                 .collect()
@@ -422,10 +433,10 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r3").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (2, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 3), (0, 0)),
-                    (Ipv4Addr::new(10, 0, 1, 4), (3, 1))
+                    ("10.0.1.1/32".parse().unwrap(), (1, 1)),
+                    ("10.0.1.2/32".parse().unwrap(), (2, 1)),
+                    ("10.0.1.3/32".parse().unwrap(), (0, 0)),
+                    ("10.0.1.4/32".parse().unwrap(), (3, 1))
                 ]
                 .into_iter()
                 .collect()
@@ -434,10 +445,10 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r4").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (1, 2)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (1, 2)),
-                    (Ipv4Addr::new(10, 0, 1, 3), (1, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 4), (0, 0))
+                    ("10.0.1.1/32".parse().unwrap(), (1, 2)),
+                    ("10.0.1.2/32".parse().unwrap(), (1, 2)),
+                    ("10.0.1.3/32".parse().unwrap(), (1, 1)),
+                    ("10.0.1.4/32".parse().unwrap(), (0, 0))
                 ]
                 .into_iter()
                 .collect()
@@ -471,8 +482,8 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r1").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (0, 0)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (1, 1))
+                    ("10.0.1.1/32".parse().unwrap(), (0, 0)),
+                    ("10.0.1.2/32".parse().unwrap(), (1, 1))
                 ]
                 .into_iter()
                 .collect()
@@ -481,8 +492,8 @@ mod tests {
             assert_eq!(
                 network.get_routing_table("r2").await,
                 [
-                    (Ipv4Addr::new(10, 0, 1, 1), (1, 1)),
-                    (Ipv4Addr::new(10, 0, 1, 2), (0, 0))
+                    ("10.0.1.1/32".parse().unwrap(), (1, 1)),
+                    ("10.0.1.2/32".parse().unwrap(), (0, 0))
                 ]
                 .into_iter()
                 .collect()
@@ -526,10 +537,10 @@ mod tests {
             assert_eq!(
                 network.get_bgp_routes("r2").await,
                 [(
-                    "10.0.1.1".parse().unwrap(),
+                    "10.0.1.0/24".parse().unwrap(),
                     (
                         Some(BGPRoute {
-                            prefix: "10.0.1.1".parse().unwrap(),
+                            prefix: "10.0.1.0/24".parse().unwrap(),
                             nexthop: "10.0.1.1".parse().unwrap(),
                             as_path: vec![1],
                             pref: 150,
@@ -538,7 +549,7 @@ mod tests {
                             source: RouteSource::EBGP
                         }),
                         [BGPRoute {
-                            prefix: "10.0.1.1".parse().unwrap(),
+                            prefix: "10.0.1.0/24".parse().unwrap(),
                             nexthop: "10.0.1.1".parse().unwrap(),
                             as_path: vec![1],
                             pref: 150,
@@ -557,10 +568,10 @@ mod tests {
             assert_eq!(
                 network.get_bgp_routes("r3").await,
                 [(
-                    "10.0.1.1".parse().unwrap(),
+                    "10.0.1.0/24".parse().unwrap(),
                     (
                         Some(BGPRoute {
-                            prefix: "10.0.1.1".parse().unwrap(),
+                            prefix: "10.0.1.0/24".parse().unwrap(),
                             nexthop: "10.0.4.4".parse().unwrap(),
                             as_path: vec![4, 1],
                             pref: 50,
@@ -569,7 +580,7 @@ mod tests {
                             source: RouteSource::EBGP
                         }),
                         [BGPRoute {
-                            prefix: "10.0.1.1".parse().unwrap(),
+                            prefix: "10.0.1.0/24".parse().unwrap(),
                             nexthop: "10.0.4.4".parse().unwrap(),
                             as_path: vec![4, 1],
                             pref: 50,
@@ -588,10 +599,10 @@ mod tests {
             assert_eq!(
                 network.get_bgp_routes("r4").await,
                 [(
-                    "10.0.1.1".parse().unwrap(),
+                    "10.0.1.0/24".parse().unwrap(),
                     (
                         Some(BGPRoute {
-                            prefix: "10.0.1.1".parse().unwrap(),
+                            prefix: "10.0.1.0/24".parse().unwrap(),
                             nexthop: "10.0.1.1".parse().unwrap(),
                             as_path: vec![1],
                             pref: 100,
@@ -601,7 +612,7 @@ mod tests {
                         }),
                         [
                             BGPRoute {
-                                prefix: "10.0.1.1".parse().unwrap(),
+                                prefix: "10.0.1.0/24".parse().unwrap(),
                                 nexthop: "10.0.1.1".parse().unwrap(),
                                 as_path: vec![1],
                                 pref: 100,
@@ -610,7 +621,7 @@ mod tests {
                                 source: RouteSource::EBGP
                             },
                             BGPRoute {
-                                prefix: "10.0.1.1".parse().unwrap(),
+                                prefix: "10.0.1.0/24".parse().unwrap(),
                                 nexthop: "10.0.2.2".parse().unwrap(),
                                 as_path: vec![2, 1],
                                 pref: 50,
@@ -683,11 +694,11 @@ mod tests {
         // wait for convergence
         thread::sleep(Duration::from_millis(2000));
 
-        let routes1 : HashMap<Ipv4Addr, (Option<BGPRoute>, HashSet<BGPRoute>)> = [(
-            "10.0.2.2".parse().unwrap(),
+        let routes1 = [(
+            "10.0.2.0/24".parse().unwrap(),
             (
                 Some(BGPRoute {
-                    prefix: "10.0.2.2".parse().unwrap(),
+                    prefix: "10.0.2.0/24".parse().unwrap(),
                     nexthop: "10.0.2.2".parse().unwrap(),
                     as_path: vec![2],
                     pref: 150,
@@ -696,7 +707,7 @@ mod tests {
                     source: RouteSource::EBGP,
                 }),
                 [BGPRoute {
-                    prefix: "10.0.2.2".parse().unwrap(),
+                    prefix: "10.0.2.0/24".parse().unwrap(),
                     nexthop: "10.0.2.2".parse().unwrap(),
                     as_path: vec![2],
                     pref: 150,
@@ -760,8 +771,8 @@ mod tests {
         
             let bgp_table = network.get_bgp_routes("r2").await;
             let mut expected_table = HashMap::new();
-            expected_table.insert("10.0.2.4".parse().unwrap(), (Some(BGPRoute{
-                prefix: "10.0.2.4".parse().unwrap(),
+            expected_table.insert("10.0.2.0/24".parse().unwrap(), (Some(BGPRoute{
+                prefix: "10.0.2.0/24".parse().unwrap(),
                 nexthop: "10.0.1.1".parse().unwrap(),
                 as_path: vec![2],
                 pref: 50,
@@ -769,7 +780,7 @@ mod tests {
                 router_id: 1,
                 source: RouteSource::IBGP,
             }), [BGPRoute{
-                prefix: "10.0.2.4".parse().unwrap(),
+                prefix: "10.0.2.0/24".parse().unwrap(),
                 nexthop: "10.0.1.1".parse().unwrap(),
                 as_path: vec![2],
                 pref: 50,
@@ -778,8 +789,8 @@ mod tests {
                 source: RouteSource::IBGP,
             }].into_iter().collect()));
 
-            expected_table.insert("10.0.3.5".parse().unwrap(), (Some(BGPRoute{
-                prefix: "10.0.3.5".parse().unwrap(),
+            expected_table.insert("10.0.3.0/24".parse().unwrap(), (Some(BGPRoute{
+                prefix: "10.0.3.0/24".parse().unwrap(),
                 nexthop: "10.0.1.3".parse().unwrap(),
                 as_path: vec![3],
                 pref: 150,
@@ -787,7 +798,7 @@ mod tests {
                 router_id: 3,
                 source: RouteSource::IBGP,
             }), [BGPRoute{
-                prefix: "10.0.3.5".parse().unwrap(),
+                prefix: "10.0.3.0/24".parse().unwrap(),
                 nexthop: "10.0.1.3".parse().unwrap(),
                 as_path: vec![3],
                 pref: 150,
