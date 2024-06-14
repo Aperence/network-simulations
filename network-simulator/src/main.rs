@@ -30,7 +30,7 @@ async fn main() -> Result<(), ()> {
         .add_link("r1", 2, "r2", 1, 0)
         .await;
     network
-        .add_link("r2", 2, "r3", 1, 0)
+        .add_link("r2", 2, "r3", 3, 0)
         .await;
     network
         .add_link("r1", 3, "r3", 2, 0)
@@ -44,19 +44,14 @@ async fn main() -> Result<(), ()> {
     }
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(250));
-
-    network.print_routing_tables().await;
+    thread::sleep(Duration::from_millis(1000));
 
     network.announce_prefix("r4").await;
     network.announce_prefix("r5").await;
 
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(1000));
 
-    network.print_routing_tables().await;
-    network.ping("r4", "10.0.3.5".parse().unwrap()).await;
-
-    thread::sleep(Duration::from_millis(250));
+    network.print_bgp_tables().await;
 
     network.quit().await;
 

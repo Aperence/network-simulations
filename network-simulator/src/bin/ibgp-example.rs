@@ -20,7 +20,7 @@ async fn main() -> Result<(), ()> {
         .await;
 
     network
-        .add_provider_customer_link("r3", 1, "r5", 3, 0)
+        .add_provider_customer_link("r3", 3, "r5", 3, 0)
         .await;
 
     network
@@ -41,14 +41,14 @@ async fn main() -> Result<(), ()> {
     }
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(250));
+    thread::sleep(Duration::from_millis(1000));
 
     network.print_routing_tables().await;
 
     network.announce_prefix("r4").await;
     network.announce_prefix("r5").await;
 
-    thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(1000));
 
     network.print_bgp_tables().await;
     network.ping("r4", "10.0.3.5".parse().unwrap()).await;

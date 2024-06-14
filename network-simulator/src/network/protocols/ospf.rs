@@ -2,7 +2,9 @@ use std::{collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet}, net::Ipv
 
 use tokio::sync::{mpsc::Sender, Mutex};
 
-use crate::network::{logger::{Logger, Source}, messages::{ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo};
+use crate::network::{logger::{Logger, Source}, messages::{ip::IP, ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo};
+
+use super::arp::{ArpState, MacAddress};
 
 #[derive(Ord, PartialEq, Eq, Hash, Clone)]
 pub struct Node{
@@ -25,11 +27,12 @@ pub struct OSPFState{
     pub received_lsp: HashSet<(Ipv4Addr, u32)>,
     pub lsp_seq: u32,
     pub router_info: Arc<Mutex<RouterInfo>>,
+    pub arp_state: Arc<Mutex<ArpState>>,
     pub logger: Logger
 }
 
 impl OSPFState{
-    pub fn new(ip: Ipv4Addr, logger: Logger, router_info: Arc<Mutex<RouterInfo>>) -> OSPFState{
+    pub fn new(ip: Ipv4Addr, logger: Logger, router_info: Arc<Mutex<RouterInfo>>, arp_state: Arc<Mutex<ArpState>>) -> OSPFState{
         OSPFState{
             topo: HashMap::new(),
             direct_neighbors: HashSet::new(),
@@ -37,12 +40,48 @@ impl OSPFState{
             received_lsp: HashSet::new(),
             lsp_seq: 0,
             router_info,
+            arp_state,
             logger
         }
     }
 
-    pub fn get_port(&self, ip: Ipv4Addr) -> Option<&(u32, u32)>{
-        self.routing_table.get(&ip)
+    pub async fn send_message(&self, nexthop: Ipv4Addr, content: IP){
+        let info_router = self.router_info.lock().await;
+        if let Some((port, mac)) = self.get_port_mac(nexthop).await{
+            if let Some((_, sender, _, _)) = info_router.bgp_links.get(&port){
+                sender.send(Message::EthernetFrame(mac, content)).await.unwrap();
+            }else{
+                let (_, sender, _) = info_router.neighbors.get(&port).unwrap();
+                sender.send(Message::EthernetFrame(mac, content)).await.unwrap();
+            }
+        }
+    }
+
+    pub async fn get_port_mac(&self, ip: Ipv4Addr) -> Option<(u32, MacAddress)>{
+        let p = self.routing_table.get(&ip);
+        if let Some((port, _)) = p{
+            for (_, p, ip) in self.direct_neighbors.iter(){
+                if p == port{
+                    let arp_state = self.arp_state.lock().await;
+                    let mac_address = arp_state.mapping.get(ip);
+                    if mac_address.is_some(){
+                        return Some((*p, mac_address.unwrap().clone()));
+                    }
+                }
+            }
+            None
+        }else{
+            None
+        }
+    }
+
+    pub async fn get_port(&self, ip: Ipv4Addr) -> Option<u32>{
+        let p = self.routing_table.get(&ip);
+        if let Some((port, _)) = p{
+            Some(*port)
+        }else{
+            None
+        }
     }
 
     pub async fn process_ospf(&mut self, ospf: OSPFMessage, port: u32){

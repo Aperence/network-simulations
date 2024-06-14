@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::network::{
     logger::{Logger, Source},
-    messages::{bgp::{BGPMessage, IBGPMessage}, Message},
+    messages::{bgp::{BGPMessage, IBGPMessage}, ip::{Content, IP}, Message},
     router::RouterInfo,
 };
 
@@ -76,8 +76,8 @@ impl BGPState {
 
     pub async fn install_route(&self, route: BGPRoute){
         let mut igp_state = self.igp_info.lock().await;
-        let port = igp_state.get_port(route.nexthop).unwrap().clone();
-        igp_state.routing_table.insert(route.prefix, port);
+        let port = igp_state.get_port(route.nexthop).await.unwrap().clone();
+        igp_state.routing_table.insert(route.prefix, (port, 0));
     }
 
     pub async fn process_update(
@@ -369,13 +369,18 @@ impl BGPState {
 
     pub async fn send_ibgp_update(&self, prefix: Ipv4Addr, as_path: Vec<u32>, pref_from: u32, med: u32) {
         let igp_state = self.igp_info.lock().await;
-        let info = self.router_info.lock().await;
-        for peer_addr in info.ibgp_peers.iter() {
-            let message = IBGPMessage::Update(prefix, info.ip, as_path.clone(), pref_from, med, info.id);
-            if let Some((port, _)) = igp_state.get_port(*peer_addr){
-                let (_, sender, _) = info.neighbors.get(port).unwrap();
-                sender.send(Message::IBGP(message)).await.unwrap();
-            }
+        let info =  self.router_info.lock().await;
+        let peers = info.ibgp_peers.clone();
+        let self_ip = info.ip;
+        let self_id = info.id;
+        drop(info);
+        for peer_addr in peers {
+            let message = IP{
+                src: self_ip, 
+                dest: peer_addr.clone(), 
+                content: Content::IBGP(IBGPMessage::Update(prefix, self_ip, as_path.clone(), pref_from, med, self_id))
+            };
+            igp_state.send_message(peer_addr.clone(), message).await;
         }
     }
 
@@ -393,13 +398,18 @@ impl BGPState {
 
     pub async fn send_ibgp_withdraw(&self, prefix: Ipv4Addr, as_path: Vec<u32>) {
         let igp_state = self.igp_info.lock().await;
-        let info = self.router_info.lock().await;
-        for peer_addr in info.ibgp_peers.iter() {
-            let message = IBGPMessage::Withdraw(prefix, info.ip, as_path.clone(), info.id);
-            if let Some((port, _)) = igp_state.get_port(*peer_addr){
-                let (_, sender, _) = info.neighbors.get(port).unwrap();
-                sender.send(Message::IBGP(message)).await.unwrap();
-            }
+        let info =  self.router_info.lock().await;
+        let peers = info.ibgp_peers.clone();
+        let self_ip = info.ip;
+        let self_id = info.id;
+        drop(info);
+        for peer_addr in peers {
+            let message = IP{
+                src: self_ip, 
+                dest: peer_addr.clone(), 
+                content: Content::IBGP(IBGPMessage::Withdraw(prefix, self_ip, as_path.clone(), self_id))
+            };
+            igp_state.send_message(peer_addr.clone(), message).await;
         }
     }
 

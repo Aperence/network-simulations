@@ -10,7 +10,8 @@ pub enum Source{
     Ping,
     Debug,
     IP,
-    BGP
+    BGP,
+    ARP
 }
 
 #[derive(Debug)]

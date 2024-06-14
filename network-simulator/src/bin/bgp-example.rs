@@ -26,12 +26,12 @@ async fn main() -> Result<(), ()> {
     network.announce_prefix("r3").await;
 
     // wait for convergence
-    thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(1000));
 
     network.print_bgp_tables().await;
     network.ping("r1", "10.0.3.3".parse().unwrap()).await;
 
-    thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(1000));
 
     network.quit().await;
 

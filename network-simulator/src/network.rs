@@ -2,6 +2,7 @@ pub mod communicators;
 pub mod logger;
 pub mod messages;
 pub mod protocols;
+pub mod ip_trie;
 pub mod router;
 pub mod switch;
 use logger::{Logger, Source};
@@ -22,6 +23,7 @@ use self::switch::Switch;
 pub struct Network {
     switches: BTreeMap<String, SwitchCommunicator>,
     routers: BTreeMap<String, (RouterCommunicator, Ipv4Addr)>,
+    used_port: BTreeMap<String, HashSet<u32>>,
     links: Vec<(String, u32, String, u32, u32)>,
     logger: Logger,
 }
@@ -31,6 +33,7 @@ impl Network {
         Network {
             switches: BTreeMap::new(),
             routers: BTreeMap::new(),
+            used_port: BTreeMap::new(),
             links: vec![],
             logger: Logger::start(),
         }
@@ -40,6 +43,7 @@ impl Network {
         Network {
             switches: BTreeMap::new(),
             routers: BTreeMap::new(),
+            used_port: BTreeMap::new(),
             links: vec![],
             logger: Logger::start_with_filters(filters),
         }
@@ -48,10 +52,12 @@ impl Network {
     pub fn add_switch(&mut self, name: &str, id: u32) {
         let communicator = Switch::start(name.to_string(), id, self.logger.clone());
         self.switches.insert(name.to_string(), communicator);
+        self.used_port.insert(name.to_string(), HashSet::new());
     }
 
     pub fn add_router(&mut self, name: &str, id: u32, router_as: u32) {
         let communicator = Router::start(name.to_string(), id, router_as, self.logger.clone());
+        self.used_port.insert(name.to_string(), HashSet::new());
         self.routers.insert(
             name.to_string(),
             (
@@ -65,6 +71,15 @@ impl Network {
         self.routers.keys().map(|r| r.clone()).into_iter().collect()
     }
 
+    pub fn check_port_not_used(&mut self, device: &str, port: u32){
+        let ports = self.used_port.get_mut(device).unwrap();
+        if ports.contains(&port){
+            panic!("Port {} is already used for device {}", port, device);
+        }else{
+            ports.insert(port);
+        }
+    }
+
     pub async fn add_peer_link(
         &mut self,
         device1: &str,
@@ -73,6 +88,8 @@ impl Network {
         port2: u32,
         med: u32,
     ) {
+        self.check_port_not_used(device1, port1);
+        self.check_port_not_used(device2, port2);
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
 
@@ -96,6 +113,8 @@ impl Network {
         port2: u32,
         med: u32,
     ) {
+        self.check_port_not_used(provider, port1);
+        self.check_port_not_used(customer, port2);
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
 
@@ -124,6 +143,8 @@ impl Network {
         port2: u32,
         cost: u32,
     ) {
+        self.check_port_not_used(device1, port1);
+        self.check_port_not_used(device2, port2);
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
         match self.switches.get(&device1.to_string()) {
@@ -709,7 +730,7 @@ mod tests {
                 .await;
         
             network
-                .add_provider_customer_link("r3", 1, "r5", 3, 0)
+                .add_provider_customer_link("r3", 3, "r5", 3, 0)
                 .await;
         
             network
@@ -730,12 +751,12 @@ mod tests {
             }
         
             // wait for convergence
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(Duration::from_millis(1000));
         
             network.announce_prefix("r4").await;
             network.announce_prefix("r5").await;
         
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(Duration::from_millis(1000));
         
             let bgp_table = network.get_bgp_routes("r2").await;
             let mut expected_table = HashMap::new();
@@ -775,9 +796,7 @@ mod tests {
                 source: RouteSource::IBGP,
             }].into_iter().collect()));
             assert_eq!(bgp_table, expected_table);
-            
-        
-            thread::sleep(Duration::from_millis(250));
+
         
             network.quit().await;
         }
