@@ -6,7 +6,7 @@ pub mod ip_trie;
 pub mod router;
 pub mod switch;
 use ip_trie::IPPrefix;
-use logger::{Logger, Source};
+use logger::Logger;
 use protocols::bgp::BGPRoute;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -31,25 +31,14 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new() -> Network {
+    pub fn new(logger: Logger) -> Network {
         Network {
             switches: BTreeMap::new(),
             routers: BTreeMap::new(),
             used_port: BTreeMap::new(),
             links: vec![],
             router_as: HashMap::new(),
-            logger: Logger::start(),
-        }
-    }
-
-    pub fn new_with_filters(filters: Vec<Source>) -> Network {
-        Network {
-            switches: BTreeMap::new(),
-            routers: BTreeMap::new(),
-            used_port: BTreeMap::new(),
-            links: vec![],
-            router_as: HashMap::new(),
-            logger: Logger::start_with_filters(filters),
+            logger,
         }
     }
 
@@ -332,7 +321,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_spanning_tree() {
         for _ in 0..10 {
-            let mut network = Network::new();
+            let logger = Logger::start();
+            let mut network = Network::new(logger);
             network.add_switch("s1", 1);
             network.add_switch("s2", 2);
             network.add_switch("s3", 3);
@@ -392,7 +382,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_ospf() {
         for _ in 0..10 {
-            let mut network = Network::new_with_filters(vec![Source::Ping]);
+            let logger = Logger::start();
+            let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);
             network.add_router("r3", 3, 1);
@@ -461,7 +452,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_mix_switches_routers() {
         for _ in 0..10 {
-            let mut network = Network::new_with_filters(vec![]);
+            let logger = Logger::start();
+            let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);
             network.add_switch("s1", 11);
@@ -509,7 +501,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     async fn test_bgp() {
         for _ in 0..5 {
-            let mut network = Network::new_with_filters(vec![Source::BGP]);
+            let logger = Logger::start();
+            let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 2);
             network.add_router("r3", 3, 3);
@@ -644,7 +637,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     pub async fn test_bgp_complex() {
-        let mut network = Network::new_with_filters(vec![Source::Ping, Source::BGP]);
+        let logger = Logger::start();
+        let mut network = Network::new(logger);
         network.add_router("r1", 1, 1);
         network.add_router("r2", 2, 2);
         network.add_router("r3", 3, 3);
@@ -729,7 +723,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     async fn test_ibgp(){
         for _ in 0..5{
-            let mut network = Network::new_with_filters(vec![Source::BGP, Source::Ping]);
+            let logger = Logger::start();
+            let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);
             network.add_router("r3", 3, 1);

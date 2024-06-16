@@ -1,0 +1,55 @@
+network:
+  routers:
+    - name: "r1"
+      id: 1
+      AS: 1
+    - name: "r2"
+      id: 2
+      AS: 2
+    - name: "r3"
+      id: 3
+      AS: 3
+    - name: "r4"
+      id: 4
+      AS: 4
+    - name: "r5"
+      id: 5
+      AS: 5
+    - name: "r6"
+      id: 6
+      AS: 6
+    - name: "r7"
+      id: 7
+      AS: 7
+    - name: "r8"
+      id: 8
+      AS: 8
+  links:
+    bgp:
+      provider-customer:
+        - provider: "r1"
+          customer: "r2"
+        - provider: "r4"
+          customer: "r3"
+        - provider: "r5"
+          customer: "r2"
+        - provider: "r7"
+          customer: "r4"
+        - provider: "r6"
+          customer: "r7"
+        - provider: "r8"
+          customer: "r7"
+        - provider: "r3"
+          customer: "r1"
+      peer:
+        - ["r2", "r3"]
+        - ["r4", "r5"]
+        - ["r5", "r6"]
+        - ["r6", "r8"]
+
+  config:
+    log: ["BGP"]
+
+  actions:
+    announce_prefix: ["r2"]
+    print_bgp_tables: true

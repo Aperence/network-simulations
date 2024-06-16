@@ -1,17 +1,33 @@
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use log::info;
+use strum_macros::EnumIter;
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(EnumIter, PartialEq, Eq, Clone)]
 pub enum Source{
     OSPF,
     SPT,
-    Ping,
-    Debug,
+    PING,
+    DEBUG,
     IP,
     BGP,
     ARP
+}
+
+impl Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self{
+            Source::OSPF => "OSPF",
+            Source::SPT => "SPT",
+            Source::PING => "PING",
+            Source::DEBUG => "DEBUG",
+            Source::IP => "IP",
+            Source::BGP => "BGP",
+            Source::ARP => "ARP",
+        };
+        write!(f, "{}", str)
+    }
 }
 
 #[derive(Debug)]
@@ -21,6 +37,7 @@ pub struct Logger{
 
 impl Logger{
     pub fn start() -> Logger{
+        env_logger::init();
         let (tx, rx) = channel(1024);
         tokio::spawn(async move{
             Self::write_loop(rx, vec![]).await
@@ -29,6 +46,7 @@ impl Logger{
     }
 
     pub fn start_with_filters(filters: Vec<Source>) -> Logger{
+        env_logger::init();
         let (tx, rx) = channel(1024);
         tokio::spawn(async move{
             Self::write_loop(rx, filters).await

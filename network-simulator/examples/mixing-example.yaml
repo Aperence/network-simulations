@@ -1,0 +1,42 @@
+network:
+  routers:
+    - name: "r1"
+      id: 1
+      AS: 1
+    - name: "r2"
+      id: 2
+      AS: 1
+    - name: "r3"
+      id: 3
+      AS: 2
+    - name: "r4"
+      id: 4
+      AS: 1
+    - name: "r5"
+      id: 5
+      AS: 3
+  links:
+    internal: 
+      - ["r1", "r2", 2]
+      - ["r1", "r4"]
+    bgp:
+      provider-customer:
+        - provider: "r1"
+          customer: "r3"
+      peer:
+        - ["r4", "r5"]
+      ibgp:
+        - ["r1", "r4"]
+        - ["r1", "r2"]
+        - ["r2", "r4"]
+
+  config:
+    log: ["BGP", "PING"]
+
+  actions:
+    announce_prefix: [1, "r3", 3] # AS1 announce, r3 announce and AS3 announce
+    ping:
+      - from: "r2"
+        to: "10.0.2.3"
+    print_bgp_tables: true
+    print_routing_tables: true

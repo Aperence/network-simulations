@@ -102,7 +102,7 @@ impl Router{
         let name = info.name.clone();
         drop(info);
         for (message, port) in received_messages{
-            self.logger.log(Source::Debug, format!("Router {} received {:?}", name, message)).await;
+            self.logger.log(Source::DEBUG, format!("Router {} received {:?}", name, message)).await;
             
             match message{
                 Message::BPDU(_) => (), // don't care about bdpus
@@ -140,11 +140,11 @@ impl Router{
         drop(info);
         match ip_packet.content{
             Content::Ping => {
-                self.logger.log(Source::Ping, format!("Router {} received ping from {}", name, ip_packet.src)).await;
+                self.logger.log(Source::PING, format!("Router {} received ping from {}", name, ip_packet.src)).await;
                 self.send_message(ip_packet.src, IP{src: ip, dest: ip_packet.src, content: Content::Pong}).await;
             },
             Content::Pong => {
-                self.logger.log(Source::Ping, format!("Router {} received ping back from {}", name, ip_packet.src)).await;
+                self.logger.log(Source::PING, format!("Router {} received ping back from {}", name, ip_packet.src)).await;
             },
             Content::Data(data) => {
                 self.logger.log(Source::IP, format!("Router {} received data {} from {}", name, data, ip_packet.src)).await;
@@ -169,7 +169,7 @@ impl Router{
         let src = info.ip.clone();
         let name = info.name.clone();
         drop(info);
-        self.logger.log(Source::Ping, format!("Router {} sending ping message to {}", name, dest)).await;
+        self.logger.log(Source::PING, format!("Router {} sending ping message to {}", name, dest)).await;
         self.send_message(dest, IP{src, dest, content: Content::Ping}).await;
     }
 
@@ -179,7 +179,7 @@ impl Router{
                 match command{
                     Command::AddLink(receiver, sender, port, cost) => {
                         let mut info = self.router_info.lock().await;
-                        self.logger.log(Source::Debug, format!("Router {} received adding link", info.name)).await;
+                        self.logger.log(Source::DEBUG, format!("Router {} received adding link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.neighbors.insert(port, (receiver, sender, cost));
                         false
@@ -196,7 +196,7 @@ impl Router{
                     },
                     Command::AddPeerLink(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
-                        self.logger.log(Source::Debug, format!("Router {} received adding peer link", info.name)).await;
+                        self.logger.log(Source::DEBUG, format!("Router {} received adding peer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 100, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
@@ -208,7 +208,7 @@ impl Router{
                     },
                     Command::AddProvider(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
-                        self.logger.log(Source::Debug, format!("Router {} received adding provider link", info.name)).await;
+                        self.logger.log(Source::DEBUG, format!("Router {} received adding provider link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 50, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
@@ -220,7 +220,7 @@ impl Router{
                     },
                     Command::AddCustomer(receiver, sender, port, med, other_ip) => {
                         let mut info = self.router_info.lock().await;
-                        self.logger.log(Source::Debug, format!("Router {} received adding customer link", info.name)).await;
+                        self.logger.log(Source::DEBUG, format!("Router {} received adding customer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
                         info.bgp_links.insert(port, (receiver, sender, 150, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
@@ -247,7 +247,7 @@ impl Router{
                     },
                     Command::AddIBGP(peer_addr) => {
                         let mut info = self.router_info.lock().await;
-                        self.logger.log(Source::Debug, format!("Router {} received adding ibp connection to {}", info.name, peer_addr)).await;
+                        self.logger.log(Source::DEBUG, format!("Router {} received adding ibp connection to {}", info.name, peer_addr)).await;
                         info.ibgp_peers.push(peer_addr);
                         false
                     },

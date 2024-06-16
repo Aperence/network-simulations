@@ -1,0 +1,30 @@
+network:
+  switches:
+    - name: "s1"
+      id: 1
+    - name: "s2"
+      id: 2
+    - name: "s3"
+      id: 3
+    - name: "s4"
+      id: 4
+    - name: "s6"
+      id: 6
+    - name: "s9"
+      id: 9
+  links:
+    internal: 
+      - ["s1", "s2"]
+      - ["s1", "s4"]
+      - ["s2", "s9"]
+      - ["s4", "s9"]
+      - ["s4", "s3"]
+      - ["s9", "s3"]
+      - ["s9", "s6"]
+      - ["s3", "s6"]
+
+  config:
+    log: ["SPT", "PING"]
+
+  actions:
+    print_port_states: true

@@ -1,0 +1,35 @@
+network:
+  routers:
+    - name: "r1"
+      id: 1
+      AS: 1
+    - name: "r2"
+      id: 2
+      AS: 2
+    - name: "r3"
+      id: 3
+      AS: 3
+    - name: "r4"
+      id: 4
+      AS: 4
+  links:
+    bgp:
+      provider-customer:
+        - provider: "r2"
+          customer: "r1"
+        - provider: "r2"
+          customer: "r4"
+        - provider: "r4"
+          customer: "r3"
+      peer:
+        - ["r1", "r4"]
+
+  config:
+    log: ["BGP", "PING"]
+
+  actions:
+    announce_prefix: ["r1", "r3"] 
+    ping:
+      - from: "r1"
+        to: "10.0.3.3"
+    print_bgp_tables: true
