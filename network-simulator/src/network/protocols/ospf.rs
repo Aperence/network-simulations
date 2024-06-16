@@ -1,10 +1,10 @@
-use std::{collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet}, net::Ipv4Addr, sync::Arc};
+use std::{collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet}, net::Ipv4Addr};
 
-use tokio::sync::{mpsc::Sender, Mutex};
+use tokio::sync::mpsc::Sender;
 
-use crate::network::{ip_trie::{IPPrefix, IPTrie}, logger::{Logger, Source}, messages::{ip::IP, ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo};
+use crate::network::{ip_prefix::IPPrefix, ip_trie::IPTrie, logger::{Logger, Source}, messages::{ip::IP, ospf::OSPFMessage::{self, *}, Message}, router::RouterInfo, utils::{MacAddress, SharedState}};
 
-use super::arp::{ArpState, MacAddress};
+use super::arp::ArpState;
 
 #[derive(Ord, PartialEq, Eq, Hash, Clone)]
 pub struct Node{
@@ -27,13 +27,13 @@ pub struct OSPFState{
     pub prefixes: IPTrie<IPPrefix>,
     pub received_lsp: HashSet<(Ipv4Addr, u32)>,
     pub lsp_seq: u32,
-    pub router_info: Arc<Mutex<RouterInfo>>,
-    pub arp_state: Arc<Mutex<ArpState>>,
+    pub router_info: SharedState<RouterInfo>,
+    pub arp_state: SharedState<ArpState>,
     pub logger: Logger
 }
 
 impl OSPFState{
-    pub fn new(ip: Ipv4Addr, logger: Logger, router_info: Arc<Mutex<RouterInfo>>, arp_state: Arc<Mutex<ArpState>>) -> OSPFState{
+    pub fn new(ip: Ipv4Addr, logger: Logger, router_info: SharedState<RouterInfo>, arp_state: SharedState<ArpState>) -> OSPFState{
         let prefix = IPPrefix{ip, prefix_len: 32};
         let mut prefixes = IPTrie::new();
         prefixes.insert(prefix, prefix);
@@ -53,12 +53,8 @@ impl OSPFState{
     pub async fn send_message(&self, nexthop: Ipv4Addr, content: IP){
         if let Some((port, mac)) = self.get_port_mac(nexthop).await{
             let info_router = self.router_info.lock().await;
-            if let Some((_, sender, _, _)) = info_router.bgp_links.get(&port){
-                sender.send(Message::EthernetFrame(mac, content)).await.unwrap();
-            }else{
-                let (_, sender, _) = info_router.neighbors.get(&port).unwrap();
-                sender.send(Message::EthernetFrame(mac, content)).await.unwrap();
-            }
+            let (_, sender) = info_router.neighbors_links.get(&port).unwrap();
+            sender.send(Message::EthernetFrame(mac, content)).await.expect("Failed to send ethernet frame");
         }
     }
 
@@ -138,7 +134,7 @@ impl OSPFState{
         if self.get_ip().await == ip.ip{
             return;
         }
-        let map = self.get_neighbors().await;
+        let map = self.get_igp_neighbors().await;
         let (_, cost) = map.get(&port).unwrap();
         if self.direct_neighbors.contains(&(*cost, port, ip)){
             return;
@@ -166,14 +162,14 @@ impl OSPFState{
     }
 
     pub async fn send_lsp(&mut self, lsp: OSPFMessage){
-        for (port, (sender, _)) in self.get_neighbors().await.iter() {
+        for (port, (sender, _)) in self.get_igp_neighbors().await.iter() {
             self.logger.log(Source::OSPF, format!("Router {} sending {:?} on port {}", self.get_name().await, lsp, port)).await;
             sender.send(Message::OSPF(lsp.clone())).await.unwrap();
         }
     }
 
     pub async fn send_hello(&self){
-        for (port, (sender, _)) in self.get_neighbors().await.iter() {
+        for (port, (sender, _)) in self.get_igp_neighbors().await.iter() {
             let msg = Message::OSPF(Hello);
             self.logger.log(Source::OSPF, format!("Router {} sending Hello on port {}", self.get_name().await, port)).await;
             sender.send(msg).await.unwrap();
@@ -181,7 +177,7 @@ impl OSPFState{
     }
 
     pub async fn send_hello_reply(&self, port: u32){
-        let map = self.get_neighbors().await;
+        let map = self.get_igp_neighbors().await;
         let (sender, _) = map.get(&port).unwrap();
         self.logger.log(Source::OSPF, format!("Router {} sending hello reply on port {}", self.get_name().await, port)).await;
         let prefix = IPPrefix{ip: self.get_ip().await, prefix_len: 32};
@@ -196,9 +192,11 @@ impl OSPFState{
         self.router_info.lock().await.name.clone()
     }
 
-    pub async fn get_neighbors(&self) -> HashMap<u32, (Sender<Message>, u32)>{
+    pub async fn get_igp_neighbors(&self) -> HashMap<u32, (Sender<Message>, u32)>{
         let mut map = HashMap::new();
-        for (port, (_, sender, cost)) in self.router_info.lock().await.neighbors.iter(){
+        let info = self.router_info.lock().await;
+        for (port, cost) in info.igp_links.iter(){
+            let (_, sender) = info.neighbors_links.get(&port).unwrap();
             map.insert(*port, (sender.clone(), *cost));
         }
         map

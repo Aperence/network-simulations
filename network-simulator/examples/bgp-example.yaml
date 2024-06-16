@@ -32,4 +32,6 @@ network:
     ping:
       - from: "r1"
         to: "10.0.3.3"
+      - from: "r3"
+        to: "10.0.1.1"
     print_bgp_tables: true

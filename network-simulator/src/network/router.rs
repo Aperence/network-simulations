@@ -1,12 +1,15 @@
 use std::{cell::RefCell, collections::HashMap, net::Ipv4Addr, rc::Rc, sync::Arc, time::SystemTime};
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
-use super::{ip_trie::IPPrefix, logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::{arp::{ArpState, MacAddress}, bgp::BGPState}};
+use super::{ip_prefix::IPPrefix, logger::{Logger, Source}, messages::{ip::{Content, IP}, Message}, protocols::{arp::ArpState, bgp::BGPState}, utils::{MacAddress, SharedState}};
 use super::communicators::{RouterCommunicator, Command, Response};
 use super::protocols::ospf::OSPFState;
 
-type Neighbor = (Arc<Mutex<Receiver<Message>>>, Sender<Message>, u32); // receiver, sender, cost
-type BGPNeighbor = (Arc<Mutex<Receiver<Message>>>, Sender<Message>, u32, u32); // receiver, sender, pref, med
+type Neighbor = (SharedState<Receiver<Message>>, Sender<Message>); // receiver, sender
+
+type BGPNeighbor = (u32, u32); // pref, med
+
+type IGPNeighbor = u32;  // cost
 
 #[derive(Debug)]
 pub struct RouterInfo{
@@ -15,19 +18,20 @@ pub struct RouterInfo{
     pub router_as: u32,
     pub ip: Ipv4Addr,
     pub mac_address: MacAddress,
-    pub neighbors: HashMap<u32, Neighbor>,
+    pub neighbors_links: HashMap<u32, Neighbor>,
+    pub igp_links: HashMap<u32, IGPNeighbor>,
     pub bgp_links: HashMap<u32, BGPNeighbor>,
     pub ibgp_peers: Vec<Ipv4Addr>
 }
 
 #[derive(Debug)]
 pub struct Router{
-    pub router_info: Arc<Mutex<RouterInfo>>,
+    pub router_info: SharedState<RouterInfo>,
     pub command_receiver: Receiver<Command>,
     pub command_replier: Sender<Response>,
-    pub igp_state: Arc<Mutex<OSPFState>>,
-    pub arp_state: Arc<Mutex<ArpState>>,
-    pub bgp_state: Arc<Mutex<BGPState>>,
+    pub igp_state: SharedState<OSPFState>,
+    pub arp_state: SharedState<ArpState>,
+    pub bgp_state: SharedState<BGPState>,
     pub logger: Logger
 }
 
@@ -43,7 +47,8 @@ impl Router{
             id, 
             mac_address: MacAddress{id},
             router_as,
-            neighbors: HashMap::new(), 
+            neighbors_links: HashMap::new(), 
+            igp_links: HashMap::new(),
             bgp_links: HashMap::new(),
             ibgp_peers: vec![]
         }));
@@ -72,7 +77,7 @@ impl Router{
             }
             self.receive_messages().await;
             if time.elapsed().unwrap().as_millis() > 200{
-                // every 200ms, send an hello message
+                // every 200ms, send an hello message, and refresh arp state
                 time = SystemTime::now();
                 let igp_state = self.igp_state.lock().await;
                 igp_state.send_hello().await;
@@ -87,13 +92,7 @@ impl Router{
     pub async fn receive_messages(&mut self){
         let mut received_messages = vec![];
         let info = self.router_info.lock().await;
-        for (port, (receiver, _, _)) in info.neighbors.iter(){
-            let mut receiver = receiver.lock().await;
-            if let Ok(message) = receiver.try_recv(){
-                received_messages.push((message, *port));
-            }
-        }
-        for (port, (receiver, _, _, _)) in info.bgp_links.iter(){
+        for (port, (receiver, _)) in info.neighbors_links.iter(){
             let mut receiver = receiver.lock().await;
             if let Ok(message) = receiver.try_recv(){
                 received_messages.push((message, *port));
@@ -181,7 +180,8 @@ impl Router{
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::DEBUG, format!("Router {} received adding link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
-                        info.neighbors.insert(port, (receiver, sender, cost));
+                        info.neighbors_links.insert(port, (receiver, sender));
+                        info.igp_links.insert(port, cost);
                         false
                     },
                     Command::Quit => true,
@@ -198,7 +198,8 @@ impl Router{
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::DEBUG, format!("Router {} received adding peer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
-                        info.bgp_links.insert(port, (receiver, sender, 100, med));
+                        info.neighbors_links.insert(port, (receiver, sender));
+                        info.bgp_links.insert(port, (100, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
                         let mut igp_state = self.igp_state.lock().await;
                         igp_state.routing_table.insert(prefix, (port, 1));
@@ -210,7 +211,8 @@ impl Router{
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::DEBUG, format!("Router {} received adding provider link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
-                        info.bgp_links.insert(port, (receiver, sender, 50, med));
+                        info.neighbors_links.insert(port, (receiver, sender));
+                        info.bgp_links.insert(port, (50, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
                         let mut igp_state = self.igp_state.lock().await;
                         igp_state.routing_table.insert(prefix, (port, 1));
@@ -222,7 +224,8 @@ impl Router{
                         let mut info = self.router_info.lock().await;
                         self.logger.log(Source::DEBUG, format!("Router {} received adding customer link", info.name)).await;
                         let receiver = Arc::new(Mutex::new(receiver));
-                        info.bgp_links.insert(port, (receiver, sender, 150, med));
+                        info.neighbors_links.insert(port, (receiver, sender));
+                        info.bgp_links.insert(port, (150, med));
                         let prefix = IPPrefix{ip: other_ip, prefix_len: 32};
                         let mut igp_state = self.igp_state.lock().await;
                         igp_state.routing_table.insert(prefix, (port, 1));

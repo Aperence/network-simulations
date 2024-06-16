@@ -1,6 +1,6 @@
 use std::{collections::HashSet, net::Ipv4Addr};
 
-use crate::network::ip_trie::IPPrefix;
+use crate::network::ip_prefix::IPPrefix;
 
 
 #[derive(Debug, Clone)]

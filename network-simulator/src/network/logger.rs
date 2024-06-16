@@ -36,6 +36,14 @@ pub struct Logger{
 }
 
 impl Logger{
+    pub fn start_test() -> Logger{
+        let (tx, rx) = channel(1024);
+        tokio::spawn(async move{
+            Self::write_loop(rx, vec![]).await
+        });
+        Logger{sender: Arc::new(Mutex::new(tx))}
+    }
+
     pub fn start() -> Logger{
         env_logger::init();
         let (tx, rx) = channel(1024);

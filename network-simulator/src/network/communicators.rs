@@ -3,7 +3,7 @@ use crate::network::messages::Message;
 use std::{cell::RefCell, collections::{BTreeMap, HashMap, HashSet}, net::Ipv4Addr, rc::Rc};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::{ip_trie::IPPrefix, protocols::bgp::BGPRoute};
+use super::{ip_prefix::IPPrefix, protocols::bgp::BGPRoute};
 
 pub enum Command{
     StatePorts,

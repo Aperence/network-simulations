@@ -5,7 +5,9 @@ pub mod protocols;
 pub mod ip_trie;
 pub mod router;
 pub mod switch;
-use ip_trie::IPPrefix;
+pub mod utils;
+pub mod ip_prefix;
+use ip_prefix::IPPrefix;
 use logger::Logger;
 use protocols::bgp::BGPRoute;
 use std::{
@@ -321,7 +323,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_spanning_tree() {
         for _ in 0..10 {
-            let logger = Logger::start();
+            let logger = Logger::start_test();
             let mut network = Network::new(logger);
             network.add_switch("s1", 1);
             network.add_switch("s2", 2);
@@ -382,7 +384,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_ospf() {
         for _ in 0..10 {
-            let logger = Logger::start();
+            let logger = Logger::start_test();
             let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);
@@ -452,7 +454,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
     async fn test_mix_switches_routers() {
         for _ in 0..10 {
-            let logger = Logger::start();
+            let logger = Logger::start_test();
             let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);
@@ -501,7 +503,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     async fn test_bgp() {
         for _ in 0..5 {
-            let logger = Logger::start();
+            let logger = Logger::start_test();
             let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 2);
@@ -637,7 +639,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     pub async fn test_bgp_complex() {
-        let logger = Logger::start();
+        let logger = Logger::start_test();
         let mut network = Network::new(logger);
         network.add_router("r1", 1, 1);
         network.add_router("r2", 2, 2);
@@ -723,7 +725,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     async fn test_ibgp(){
         for _ in 0..5{
-            let logger = Logger::start();
+            let logger = Logger::start_test();
             let mut network = Network::new(logger);
             network.add_router("r1", 1, 1);
             network.add_router("r2", 2, 1);

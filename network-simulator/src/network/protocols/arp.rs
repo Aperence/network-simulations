@@ -1,32 +1,23 @@
-use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
+use std::{collections::HashMap, net::Ipv4Addr};
 
-use tokio::sync::Mutex;
-
-use crate::network::{logger::{Logger, Source}, messages::{arp::ARPMessage, Message}, router::RouterInfo};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct MacAddress{
-    pub id: u32 // for simplicity, we simply use an int as an address
-}
+use crate::network::{logger::{Logger, Source}, messages::{arp::ARPMessage, Message}, router::RouterInfo, utils::{MacAddress, SharedState}};
 
 #[derive(Debug)]
 pub struct ArpState{
     pub mapping: HashMap<Ipv4Addr, MacAddress>,
-    pub router_info: Arc<Mutex<RouterInfo>>,
+    pub router_info: SharedState<RouterInfo>,
     pub logger: Logger
 }
 
 impl ArpState{
-    pub fn new(router_info: Arc<Mutex<RouterInfo>>, logger: Logger) -> ArpState{
+    pub fn new(router_info: SharedState<RouterInfo>, logger: Logger) -> ArpState{
         ArpState{mapping: HashMap::new(), router_info, logger}
     }
 
     pub async fn resolve(&self, ip: Ipv4Addr, port: u32){
         self.logger.log(Source::ARP, format!("Router {} sending resolving request for {}", self.router_info.lock().await.name, ip)).await;
         let info = self.router_info.lock().await;
-        if let Some((_, sender, _)) = info.neighbors.get(&port){
-            sender.send(Message::ARP(ARPMessage::Request(ip))).await.expect("Failed to send arp message");
-        }else if let Some((_, sender, _, _)) = info.bgp_links.get(&port){
+        if let Some((_, sender)) = info.neighbors_links.get(&port){
             sender.send(Message::ARP(ARPMessage::Request(ip))).await.expect("Failed to send arp message");
         }
     }
@@ -37,9 +28,7 @@ impl ArpState{
         if info.ip != ip{
             return;
         }
-        if let Some((_, sender, _)) = info.neighbors.get(&port){
-            sender.send(Message::ARP(ARPMessage::Reply(ip, info.mac_address.clone()))).await.expect("Failed to send arp message");
-        }else if let Some((_, sender, _, _)) = info.bgp_links.get(&port){
+        if let Some((_, sender)) = info.neighbors_links.get(&port){
             sender.send(Message::ARP(ARPMessage::Reply(ip, info.mac_address.clone()))).await.expect("Failed to send arp message");
         }
     }

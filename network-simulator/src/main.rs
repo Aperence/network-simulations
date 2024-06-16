@@ -242,15 +242,17 @@ async fn main() -> Result<(), ()> {
     generate_switchs(&mut network, &config);
     generate_links(&mut network, &config).await;
     
-    // wait for convergence
+    // wait for convergence of IGP
     thread::sleep(Duration::from_millis(1000));
 
     actions_first_round(&mut network, &config).await;
 
+    // wait for convergence of BGP
     thread::sleep(Duration::from_millis(2000));
     
     actions_second_round(&mut network, &config).await;
 
+    // wait for pings
     thread::sleep(Duration::from_millis(1000));
 
     network.quit().await;

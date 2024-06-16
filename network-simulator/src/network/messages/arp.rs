@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use crate::network::protocols::arp::MacAddress;
+use crate::network::utils::MacAddress;
 
 #[derive(Debug, Clone)]
 pub enum ARPMessage{

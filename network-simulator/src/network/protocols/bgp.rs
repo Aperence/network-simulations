@@ -1,9 +1,7 @@
-use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap, HashSet}, fmt::Display, net::Ipv4Addr, sync::Arc};
-
-use tokio::sync::Mutex;
+use std::{borrow::Borrow, collections::{hash_map::Entry, HashMap, HashSet}, fmt::Display, net::Ipv4Addr};
 
 use crate::network::{
-    ip_trie::{IPPrefix, IPTrie}, logger::{Logger, Source}, messages::{bgp::{BGPMessage, IBGPMessage}, ip::{Content, IP}, Message}, router::RouterInfo
+    ip_prefix::IPPrefix, ip_trie::IPTrie, logger::{Logger, Source}, messages::{bgp::{BGPMessage, IBGPMessage}, ip::{Content, IP}, Message}, router::RouterInfo, utils::SharedState
 };
 
 use super::ospf::OSPFState;
@@ -34,15 +32,15 @@ impl Display for BGPRoute{
 
 #[derive(Debug)]
 pub struct BGPState {
-    pub router_info: Arc<Mutex<RouterInfo>>,
-    pub igp_info: Arc<Mutex<OSPFState>>,
+    pub router_info: SharedState<RouterInfo>,
+    pub igp_info: SharedState<OSPFState>,
     pub logger: Logger,
     pub routes: HashMap<IPPrefix, HashSet<BGPRoute>>,
     pub prefixes: IPTrie<IPPrefix>
 }
 
 impl BGPState {
-    pub fn new(router_info: Arc<Mutex<RouterInfo>>, igp_info: Arc<Mutex<OSPFState>>, logger: Logger) -> BGPState {
+    pub fn new(router_info: SharedState<RouterInfo>, igp_info: SharedState<OSPFState>, logger: Logger) -> BGPState {
         BGPState {
             router_info,
             igp_info,
@@ -93,7 +91,7 @@ impl BGPState {
         let info = self.router_info.lock().await;
         let name = info.name.clone();
         let ip = info.ip;
-        let pref = info.bgp_links.get(&port).unwrap().2;
+        let pref = info.bgp_links.get(&port).unwrap().0;
         let current_as = info.router_as;
         drop(info);
         if as_path.contains(&current_as){
@@ -361,7 +359,8 @@ impl BGPState {
     pub async fn send_update(&self, prefix: IPPrefix, nexthop: Ipv4Addr, mut as_path: Vec<u32>, pref_from: u32) {
         let info = self.router_info.lock().await;
         as_path.insert(0, info.router_as);
-        for (_, (_, sender, pref, med)) in info.bgp_links.iter() {
+        for (port, (pref, med)) in info.bgp_links.iter() {
+            let (_, sender) = info.neighbors_links.get(port).unwrap();
             if pref_from != 150 && *pref != 150{
                 // send routes from peer/providers only to customers
                 continue;
@@ -394,7 +393,8 @@ impl BGPState {
     pub async fn send_withdraw(&self, prefix: IPPrefix, nexthop: Ipv4Addr, mut as_path: Vec<u32>) {
         let info = self.router_info.lock().await;
         as_path.insert(0, info.router_as);
-        for (_, (_, sender, _, _)) in info.bgp_links.iter() {
+        for (port, _) in info.bgp_links.iter() {
+            let (_, sender) = info.neighbors_links.get(port).unwrap();
             let message = BGPMessage::Withdraw(prefix.clone(), nexthop, as_path.clone(), info.id);
             sender
                 .send(Message::BGP(message))

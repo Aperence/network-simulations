@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::{BTreeMap, HashMap}, rc::Rc, sync::Arc, time::SystemTime};
 use tokio::sync::{mpsc::{channel, Receiver, Sender}, Mutex};
 
-use super::{logger::{Logger, Source}, messages::{bpdu::BPDU, Message}};
+use super::{logger::{Logger, Source}, messages::{bpdu::BPDU, Message}, utils::SharedState};
 use super::communicators::{SwitchCommunicator, Command, Response};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +21,7 @@ impl ToString for PortState{
     }
 }
 
-type Neighbor = (u32, Arc<Mutex<Receiver<Message>>>, Sender<Message>, u32); // port, receiver, sender, cost
+type Neighbor = (u32, SharedState<Receiver<Message>>, Sender<Message>, u32); // port, receiver, sender, cost
 
 #[derive(Debug)]
 pub struct Switch{

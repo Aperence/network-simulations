@@ -10,7 +10,7 @@ use ospf::OSPFMessage;
 use ip::IP;
 use bgp::BGPMessage;
 
-use super::protocols::arp::MacAddress;
+use super::utils::MacAddress;
 
 
 #[derive(Debug, Clone)]
