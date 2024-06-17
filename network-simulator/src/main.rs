@@ -193,6 +193,12 @@ async fn actions_second_round(network: &mut Network, config: &Value){
             network.ping(from, to.parse().expect("Failed to parse IP address")).await;
         }
     }
+    let print_dot_graph = &actions["print_dot_graph"];
+    if !print_dot_graph.is_null(){
+        println!("DOT graph:");
+        network.print_dot().await;
+        println!("");
+    }
 }
 
 fn get_logger(config: &Value) -> Logger{

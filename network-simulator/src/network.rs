@@ -7,6 +7,8 @@ pub mod router;
 pub mod switch;
 pub mod utils;
 pub mod ip_prefix;
+pub mod graphviz;
+use graphviz::{EdgeOption, Graph, GraphOption, NodeOption};
 use ip_prefix::IPPrefix;
 use logger::Logger;
 use protocols::bgp::BGPRoute;
@@ -27,8 +29,11 @@ pub struct Network {
     switches: BTreeMap<String, SwitchCommunicator>,
     routers: BTreeMap<String, (RouterCommunicator, Ipv4Addr)>,
     used_port: BTreeMap<String, HashSet<u32>>,
-    links: Vec<(String, u32, String, u32, u32)>,
+    internal_links: HashMap<String, Vec<(u32, String, u32, u32)>>,
+    provider_customer: Vec<(String, u32, String, u32, u32)>,
+    peers: Vec<(String, u32, String, u32, u32)>,
     router_as: HashMap<u32, Vec<String>>,
+    as_router: HashMap<String, u32>,
     logger: Logger,
 }
 
@@ -38,8 +43,11 @@ impl Network {
             switches: BTreeMap::new(),
             routers: BTreeMap::new(),
             used_port: BTreeMap::new(),
-            links: vec![],
+            internal_links: HashMap::new(),
+            provider_customer: vec![],
+            peers: vec![],
             router_as: HashMap::new(),
+            as_router: HashMap::new(),
             logger,
         }
     }
@@ -61,6 +69,7 @@ impl Network {
             ),
         );
         self.router_as.entry(router_as).or_insert(vec![]).push(name.to_string());
+        self.as_router.insert(name.to_string(), router_as);
     }
 
     pub fn routers(&self) -> Vec<String>{
@@ -86,6 +95,7 @@ impl Network {
     ) {
         self.check_port_not_used(device1, port1);
         self.check_port_not_used(device2, port2);
+        self.peers.push((device1.to_string(), port1, device2.to_string(), port2, med));
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
 
@@ -111,6 +121,7 @@ impl Network {
     ) {
         self.check_port_not_used(provider, port1);
         self.check_port_not_used(customer, port2);
+        self.provider_customer.push((provider.to_string(), port1, customer.to_string(), port2, med));
         let (tx1, rx1) = channel(1024);
         let (tx2, rx2) = channel(1024);
 
@@ -159,7 +170,8 @@ impl Network {
             },
         };
 
-        self.links.push((device1.to_string(), port1, device2.to_string(), port2, cost));
+        self.internal_links.entry(device1.to_string()).or_insert(vec![]).push((port1, device2.to_string(), port2, cost));
+        self.internal_links.entry(device2.to_string()).or_insert(vec![]).push((port2, device1.to_string(), port1, cost));
     }
 
     pub async fn add_ibgp_connection(
@@ -288,27 +300,102 @@ impl Network {
         }
     }
 
-    pub async fn print_dot(&self) {
-        let states = self.get_port_states().await;
-        println!(
-            "graph {{\n  \
-            graph [nodesep=\"2\", ranksep=\"1\"];\n  \
-            splines=\"false\";\n  \
-            node[shape = diamond];"
-        );
-        for (s1, p1, s2, p2, cost) in self.links.iter() {
-            println!(
-                "  \"{}\" -- \"{}\" [headlabel=\" {} {}\", taillabel=\" {} {}\", label=\" {}\"];",
-                s1,
-                s2,
-                p1,
-                states.get(s1).unwrap().get(p1).unwrap().to_string(),
-                p2,
-                states.get(s2).unwrap().get(p2).unwrap().to_string(),
-                cost
-            );
+    fn get_switch_as(&self) -> (HashMap<u32, Vec<String>>, Vec<String>){
+        let mut switch_as = HashMap::new();
+        let mut others = vec![];
+        for switch in self.switches.keys(){
+            let mut affiliation = None;
+            let mut inserted_other = false;
+            for (_, neighbor, _, _) in self.internal_links.get(switch).unwrap(){
+                if !self.routers.contains_key(neighbor) {
+                    continue;
+                }
+                let router_as = self.as_router.get(neighbor).unwrap();
+                match affiliation{
+                    Some(a) => {
+                        if a != router_as{
+                            others.push(switch.clone());
+                            inserted_other = true;
+                            break;
+                        }
+                    }
+                    None => affiliation = Some(router_as)
+                }
+            }
+            if !inserted_other{
+                if let Some(a) = affiliation{
+                    switch_as.entry(*a).or_insert(vec![]).push(switch.clone());
+                }else{
+                    others.push(switch.clone());
+                }
+            }
         }
-        println!("}}");
+        (switch_as, others)
+    }
+
+    pub async fn print_dot(&self) {
+
+        let mut graph = Graph::new(vec![GraphOption::RankSep("1".to_string()), GraphOption::NodeSep("1".to_string())]);
+        
+        
+        let (switch_as, others) = self.get_switch_as();
+        for (as_id, routers) in self.router_as.iter(){
+            graph.add_group(&as_id.to_string(), &format!("AS {as_id}"));
+            for router in routers{
+                graph.add_node_group(router, &as_id.to_string(), vec![NodeOption::Shape("rect".to_string())]);
+            }
+            for switch in switch_as.get(&as_id).unwrap_or(&vec![]).iter(){
+                graph.add_node_group(switch, &as_id.to_string(), vec![NodeOption::Shape("diamond".to_string())]);
+            }
+        }
+        for switch in others{
+            graph.add_node(&switch, vec![NodeOption::Shape("diamond".to_string())])
+        }
+
+        
+        let states = self.get_port_states().await;
+        for (device1, neighbors) in self.internal_links.iter() {
+            for (p1, device2, p2, cost) in neighbors{
+                if device1 > device2{
+                    continue;
+                }
+                let mut options = vec![EdgeOption::Arrowhead("none".to_string()), EdgeOption::Label(cost.to_string())];
+                if self.switches.contains_key(device1) && self.switches.contains_key(device2){
+                    options.push(EdgeOption::Headlabel(format!("{} {}", p1,
+                        states.get(device1).unwrap().get(p1).unwrap().to_string())));
+                    options.push(EdgeOption::Taillabel(format!("{} {}", p2,
+                        states.get(device2).unwrap().get(p1).unwrap().to_string())));
+                }else{
+                    options.push(EdgeOption::Headlabel(format!("{}", p1)));
+                    options.push(EdgeOption::Taillabel(format!("{}", p2)));
+                }
+                graph.add_edge(device1, device2, options);
+            }
+        }
+
+        for (device1, p1, device2, p2, _) in self.provider_customer.iter(){
+            let options = vec![
+                EdgeOption::Label("$".to_string()), 
+                EdgeOption::Headlabel(format!("{}", p1)), 
+                EdgeOption::Taillabel(format!("{}", p2)),
+                EdgeOption::Color("red".to_string()),
+                EdgeOption::FontColor("red".to_string())
+            ];
+            graph.add_edge(&device1, &device2, options);
+        }
+        for (device1, p1, device2, p2, _) in self.peers.iter(){
+            let options = vec![
+                EdgeOption::Arrowhead("none".to_string()),
+                EdgeOption::Label("=".to_string()), 
+                EdgeOption::Headlabel(format!("{}", p1)), 
+                EdgeOption::Taillabel(format!("{}", p2)),
+                EdgeOption::Color("blue".to_string()),
+                EdgeOption::FontColor("blue".to_string())
+            ];
+            graph.add_edge(&device1, &device2, options);
+        }
+
+        println!("{}", graph);
     }
 }
 
