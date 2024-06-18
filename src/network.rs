@@ -333,7 +333,7 @@ impl Network {
         (switch_as, others)
     }
 
-    pub async fn print_dot(&self) {
+    pub async fn dot_representation(&self) -> String {
 
         let mut graph = Graph::new(vec![GraphOption::RankSep("1".to_string()), GraphOption::NodeSep("1".to_string())]);
         
@@ -364,7 +364,7 @@ impl Network {
                     options.push(EdgeOption::Headlabel(format!("{} {}", p1,
                         states.get(device1).unwrap().get(p1).unwrap().to_string())));
                     options.push(EdgeOption::Taillabel(format!("{} {}", p2,
-                        states.get(device2).unwrap().get(p1).unwrap().to_string())));
+                        states.get(device2).unwrap().get(p2).unwrap().to_string())));
                 }else{
                     options.push(EdgeOption::Headlabel(format!("{}", p1)));
                     options.push(EdgeOption::Taillabel(format!("{}", p2)));
@@ -395,7 +395,7 @@ impl Network {
             graph.add_edge(&device1, &device2, options);
         }
 
-        println!("{}", graph);
+        format!("{}", graph)
     }
 }
 

@@ -1,7 +1,7 @@
 
 pub mod network;
 
-use std::{collections::HashMap, env, thread, time::Duration};
+use std::{collections::HashMap, env, fs, thread, time::Duration};
 
 use network::logger::{Logger, Source};
 use strum::IntoEnumIterator;
@@ -193,11 +193,11 @@ async fn actions_second_round(network: &mut Network, config: &Value){
             network.ping(from, to.parse().expect("Failed to parse IP address")).await;
         }
     }
-    let print_dot_graph = &actions["print_dot_graph"];
-    if !print_dot_graph.is_null(){
-        println!("DOT graph:");
-        network.print_dot().await;
-        println!("");
+    let dot_graph_file = &actions["dot_graph_file"];
+    if !dot_graph_file.is_null(){
+        let filename = dot_graph_file.as_str().expect("Dot filename should be a string");
+        let dot_repr = network.dot_representation().await;
+        fs::write(filename, dot_repr).expect("Failed to write dot representation in file");
     }
 }
 

@@ -44,4 +44,4 @@ network:
         to: "10.0.2.3"
     print_bgp_tables: true
     print_routing_tables: true
-    print_dot_graph: true
+    dot_graph_file: "mixing-graph.dot"

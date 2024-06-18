@@ -28,4 +28,4 @@ network:
 
   actions:
     print_port_states: true
-    print_dot_graph: true
+    dot_graph_file: "spt-graph.dot"
