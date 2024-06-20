@@ -113,4 +113,4 @@ PingConf ::=
 
 ## Architecture of the simulator
 
-The simulator uses Tokio, a library allowing to define tasks in Rust to work. Typically, each device of the network will be represented by a task, that can be run concurrently on different threads. This allows us to represent more realistic situations. For the communication between the different devices, we use message-passing, which closely reflects how real network operate.
+The simulator uses Tokio, a library allowing to define tasks in Rust. Typically, each device of the network will be represented by a task, that can be run concurrently on different threads. This allows us to represent more realistic situations. For the communication between the different devices, we use message-passing, which closely reflects how real networks operate.

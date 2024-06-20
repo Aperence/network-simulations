@@ -120,6 +120,7 @@ impl BGPState {
                 }
             }
             let best = best.unwrap();
+            self.logger.borrow().log(Source::BGP, format!("Router {} has new best route ({}) to reach prefix {}", name, best, best.prefix)).await;
             self.install_route(best.clone()).await;
             self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
             self.send_ibgp_update(best.prefix, best.as_path, best.pref, best.med).await;
@@ -170,6 +171,7 @@ impl BGPState {
 
             let new_best = self.decision_process(prefix).await;
             if let Some(new_best_route) = new_best{
+                self.logger.borrow().log(Source::BGP, format!("Router {} has new best route ({}) to reach prefix {}", name, new_best_route, new_best_route.prefix)).await;
                 self.install_route(new_best_route.clone()).await;
                 self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
                 if new_best_route.source != RouteSource::IBGP{
@@ -217,6 +219,7 @@ impl BGPState {
                 }
             }
             let best = best.unwrap();
+            self.logger.borrow().log(Source::BGP, format!("Router {} has new best route ({}) to reach prefix {}", name, best, best.prefix)).await;
             self.install_route(best.clone()).await;
             self.send_update(best.prefix, ip, best.as_path.clone(), best.pref).await;
             // suppose fullmesh, no need to readvertise new best to other ibgp peers
@@ -263,6 +266,7 @@ impl BGPState {
 
             let new_best = self.decision_process(prefix).await;
             if let Some(new_best_route) = new_best{
+                self.logger.borrow().log(Source::BGP, format!("Router {} has new best route ({}) to reach prefix {}", name, new_best_route, new_best_route.prefix)).await;
                 self.install_route(new_best_route.clone()).await;
                 self.send_update(prefix, ip, new_best_route.as_path.clone(), new_best_route.pref).await;
                 if new_best_route.source != RouteSource::IBGP{
@@ -366,6 +370,7 @@ impl BGPState {
                 continue;
             }
             let message = BGPMessage::Update(prefix.clone(), nexthop, as_path.clone(), *med, info.id);
+            self.logger.borrow().log(Source::BGP, format!("Router {} has sent {} on port {}", info.name, message, port)).await;
             sender
                 .send(Message::BGP(message))
                 .await
@@ -379,12 +384,15 @@ impl BGPState {
         let peers = info.ibgp_peers.clone();
         let self_ip = info.ip;
         let self_id = info.id;
+        let name = info.name.clone();
         drop(info);
         for peer_addr in peers {
+            let ibgp_message = IBGPMessage::Update(prefix.clone(), self_ip, as_path.clone(), pref_from, med, self_id);
+            self.logger.borrow().log(Source::BGP, format!("Router {} has sent iBGP message {} to peer {}", name, ibgp_message, peer_addr)).await;
             let message = IP{
                 src: self_ip, 
                 dest: peer_addr.clone(), 
-                content: Content::IBGP(IBGPMessage::Update(prefix.clone(), self_ip, as_path.clone(), pref_from, med, self_id))
+                content: Content::IBGP(ibgp_message)
             };
             igp_state.send_message(peer_addr.clone(), message).await;
         }
@@ -396,6 +404,7 @@ impl BGPState {
         for (port, _) in info.bgp_links.iter() {
             let (_, sender) = info.neighbors_links.get(port).unwrap();
             let message = BGPMessage::Withdraw(prefix.clone(), nexthop, as_path.clone(), info.id);
+            self.logger.borrow().log(Source::BGP, format!("Router {} has sent {} on port {}", info.name, message, port)).await;
             sender
                 .send(Message::BGP(message))
                 .await
@@ -409,12 +418,15 @@ impl BGPState {
         let peers = info.ibgp_peers.clone();
         let self_ip = info.ip;
         let self_id = info.id;
+        let name = info.name.clone();
         drop(info);
         for peer_addr in peers {
+            let ibgp_message = IBGPMessage::Withdraw(prefix.clone(), self_ip, as_path.clone(), self_id);
+            self.logger.borrow().log(Source::BGP, format!("Router {} has sent iBGP message {} to peer {}", name, ibgp_message, peer_addr)).await;
             let message = IP{
                 src: self_ip, 
                 dest: peer_addr.clone(), 
-                content: Content::IBGP(IBGPMessage::Withdraw(prefix.clone(), self_ip, as_path.clone(), self_id))
+                content: Content::IBGP(ibgp_message)
             };
             igp_state.send_message(peer_addr.clone(), message).await;
         }

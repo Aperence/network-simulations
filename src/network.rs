@@ -587,7 +587,7 @@ mod tests {
     }
 
     
-    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 16)]
     async fn test_bgp() {
         for _ in 0..5 {
             let logger = Logger::start_test();
